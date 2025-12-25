@@ -40,14 +40,6 @@ def init_db():
     )
     cur.execute(
         """
-        CREATE TABLE IF NOT EXISTS favorites (
-            article_id TEXT PRIMARY KEY,
-            created_at TEXT
-        )
-        """
-    )
-    cur.execute(
-        """
         CREATE TABLE IF NOT EXISTS meta (
             key TEXT PRIMARY KEY,
             value TEXT

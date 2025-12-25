@@ -22,10 +22,32 @@
             <h2>今日更新</h2>
             <p class="muted" id="result-count"></p>
           </div>
-          <div class="date-filter">
-            <input type="date" id="date-input" />
-            <button class="ghost small" id="date-search">查詢</button>
-            <button class="ghost small" id="date-today">今天</button>
+          <div class="controls">
+            <div class="date-filter">
+              <input type="date" id="date-input" />
+              <button class="ghost small" id="date-search">查詢</button>
+              <button class="ghost small" id="date-today">今天</button>
+            </div>
+            <div class="fav-tools">
+              <div class="fav-actions">
+                <button class="ghost small" id="export-favorites">匯出收藏</button>
+                <label class="ghost small import-label">
+                  匯入收藏
+                  <input type="file" id="import-favorites" accept="application/json" />
+                </label>
+                <div class="import-mode">
+                  <label>
+                    <input type="radio" name="import-mode" value="merge" checked />
+                    合併
+                  </label>
+                  <label>
+                    <input type="radio" name="import-mode" value="replace" />
+                    覆蓋
+                  </label>
+                </div>
+              </div>
+              <span class="muted fav-status" id="favorites-status"></span>
+            </div>
           </div>
         </div>
         <div class="tag-row" id="tag-row"></div>

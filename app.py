@@ -33,11 +33,6 @@ def row_to_dict(row):
     }
 
 
-def get_favorites(conn):
-    rows = conn.execute("SELECT article_id FROM favorites").fetchall()
-    return {row["article_id"] for row in rows}
-
-
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -57,13 +52,11 @@ def list_articles():
         params.append(selected_date)
     query += " ORDER BY publish_date DESC"
     rows = conn.execute(query, params).fetchall()
-    favorites = get_favorites(conn)
     last_sync = get_meta(conn, "last_sync")
     conn.close()
     articles = []
     for row in rows:
         article = row_to_dict(row)
-        article["favorite"] = article["id"] in favorites
         articles.append(article)
     if tag:
         articles = [a for a in articles if tag in a["tags"]]
@@ -89,44 +82,11 @@ def get_article(article_id):
     init_db()
     conn = get_db()
     row = conn.execute("SELECT * FROM articles WHERE id = ?", (article_id,)).fetchone()
-    favorites = get_favorites(conn)
     conn.close()
     if row is None:
         return jsonify({"error": "Not found"}), 404
     article = row_to_dict(row)
-    article["favorite"] = article["id"] in favorites
     return jsonify(article)
-
-
-@app.route("/api/favorites", methods=["GET"])
-def list_favorites():
-    init_db()
-    conn = get_db()
-    rows = conn.execute("SELECT article_id FROM favorites").fetchall()
-    conn.close()
-    return jsonify({"favorites": [row["article_id"] for row in rows]})
-
-
-@app.route("/api/favorites/<article_id>", methods=["POST"])
-def toggle_favorite(article_id):
-    init_db()
-    conn = get_db()
-    cur = conn.cursor()
-    existing = cur.execute(
-        "SELECT 1 FROM favorites WHERE article_id = ?", (article_id,)
-    ).fetchone()
-    if existing:
-        cur.execute("DELETE FROM favorites WHERE article_id = ?", (article_id,))
-        favorite = False
-    else:
-        cur.execute(
-            "INSERT INTO favorites (article_id, created_at) VALUES (?, datetime('now'))",
-            (article_id,),
-        )
-        favorite = True
-    conn.commit()
-    conn.close()
-    return jsonify({"favorite": favorite})
 
 
 @app.route("/api/refresh", methods=["POST"])
@@ -135,7 +95,8 @@ def refresh_articles():
     start_str = request.args.get("start")
     end_str = request.args.get("end")
     days = int(request.args.get("days", 3))
-    max_per_journal = int(request.args.get("max_per_journal", 5))
+    max_param = request.args.get("max_per_journal")
+    max_per_journal = int(max_param) if max_param else 5
     if start_str or end_str:
         if not (start_str and end_str):
             return jsonify({"error": "start and end required"}), 400
@@ -154,6 +115,8 @@ def refresh_articles():
             target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
         except ValueError:
             return jsonify({"error": "invalid date"}), 400
+        if max_param is None:
+            max_per_journal = 0
         stored = run_ingest_range(
             DEFAULT_JOURNALS, target_date, target_date, max_per_journal
         )

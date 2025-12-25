@@ -14,10 +14,14 @@ const refreshBtn = document.getElementById("refresh-btn");
 const dateInputEl = document.getElementById("date-input");
 const dateSearchBtn = document.getElementById("date-search");
 const dateTodayBtn = document.getElementById("date-today");
+const exportFavoritesBtn = document.getElementById("export-favorites");
+const importFavoritesInput = document.getElementById("import-favorites");
+const favoritesStatusEl = document.getElementById("favorites-status");
 const todayLabelEl = document.getElementById("today-label");
 const lastSyncEl = document.getElementById("last-sync");
 const syncStatusEl = document.getElementById("sync-status");
 const TAIWAN_TZ = "Asia/Taipei";
+const FAVORITES_KEY = "nephro_brain_favorites";
 
 const escapeHtml = (text) =>
   (text || "")
@@ -37,6 +41,65 @@ const impactLabel = (level) => {
   if (level === "yes") return "可能影響";
   if (level === "possibly") return "可能但需保留";
   return "不太影響";
+};
+
+const loadFavoriteIds = () => {
+  try {
+    const raw = localStorage.getItem(FAVORITES_KEY);
+    if (!raw) return [];
+    const data = JSON.parse(raw);
+    if (Array.isArray(data)) {
+      return data.map((item) => String(item));
+    }
+    if (data && Array.isArray(data.favorites)) {
+      return data.favorites.map((item) => String(item));
+    }
+  } catch (error) {
+    console.error(error);
+  }
+  return [];
+};
+
+const saveFavoriteIds = (ids) => {
+  const unique = Array.from(new Set(ids.map((item) => String(item))));
+  try {
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify(unique));
+  } catch (error) {
+    console.error(error);
+  }
+};
+
+const getFavoriteSet = () => new Set(loadFavoriteIds());
+
+const applyFavorites = (articles) => {
+  const favorites = getFavoriteSet();
+  articles.forEach((article) => {
+    article.favorite = favorites.has(article.id);
+  });
+  return articles;
+};
+
+const toggleFavorite = (articleId) => {
+  const favorites = getFavoriteSet();
+  if (favorites.has(articleId)) {
+    favorites.delete(articleId);
+  } else {
+    favorites.add(articleId);
+  }
+  saveFavoriteIds(Array.from(favorites));
+  return favorites.has(articleId);
+};
+
+const setFavoritesStatus = (message) => {
+  if (!favoritesStatusEl) return;
+  favoritesStatusEl.textContent = message || "";
+  if (message) {
+    setTimeout(() => {
+      if (favoritesStatusEl.textContent === message) {
+        favoritesStatusEl.textContent = "";
+      }
+    }, 4000);
+  }
 };
 
 const buildTagButton = (tag) => {
@@ -76,7 +139,11 @@ const renderList = () => {
   if (articles.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
-    empty.textContent = "這一天沒有文章，請改選其他日期。";
+    if (state.activeTag === "FAVORITES") {
+      empty.textContent = "尚未收藏文章。";
+    } else {
+      empty.textContent = "這一天沒有文章，請改選其他日期。";
+    }
     listEl.appendChild(empty);
     return;
   }
@@ -165,11 +232,9 @@ const renderDetail = () => {
   `;
 
   const favoriteBtn = document.getElementById("favorite-btn");
-  favoriteBtn.addEventListener("click", async (event) => {
+  favoriteBtn.addEventListener("click", (event) => {
     event.stopPropagation();
-    const response = await fetch(`/api/favorites/${article.id}`, { method: "POST" });
-    const data = await response.json();
-    article.favorite = data.favorite;
+    article.favorite = toggleFavorite(article.id);
     render();
   });
 };
@@ -227,7 +292,7 @@ const loadArticlesForDate = async (dateValue) => {
   }
   const response = await fetch(`/api/articles?date=${dateValue}`);
   const data = await response.json();
-  state.articles = data.articles;
+  state.articles = applyFavorites(data.articles);
   state.dateLabel = dateValue;
   state.selectedId = state.articles[0] ? state.articles[0].id : null;
   if (dateChipEl) {
@@ -259,7 +324,7 @@ const loadArticles = async (statusOverride) => {
       }
     }
   }
-  state.articles = data.articles;
+  state.articles = applyFavorites(data.articles);
   state.dateLabel = data.date || today;
   state.selectedId = state.articles[0] ? state.articles[0].id : null;
   if (dateChipEl) {
@@ -334,5 +399,63 @@ dateTodayBtn.addEventListener("click", () => {
   dateInputEl.value = today;
   loadArticlesForDate(today);
 });
+
+const getImportMode = () => {
+  const selected = document.querySelector('input[name="import-mode"]:checked');
+  return selected ? selected.value : "merge";
+};
+
+if (exportFavoritesBtn) {
+  exportFavoritesBtn.addEventListener("click", () => {
+    const favorites = loadFavoriteIds();
+    const payload = JSON.stringify(favorites, null, 2);
+    const blob = new Blob([payload], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "favorites.json";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setFavoritesStatus("已下載 favorites.json");
+  });
+}
+
+if (importFavoritesInput) {
+  importFavoritesInput.addEventListener("change", () => {
+    const file = importFavoritesInput.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        let imported = [];
+        if (Array.isArray(data)) {
+          imported = data;
+        } else if (data && Array.isArray(data.favorites)) {
+          imported = data.favorites;
+        }
+        const normalized = imported.map((item) => String(item)).filter(Boolean);
+        const mode = getImportMode();
+        if (mode === "replace") {
+          saveFavoriteIds(normalized);
+        } else {
+          const merged = new Set([...loadFavoriteIds(), ...normalized]);
+          saveFavoriteIds(Array.from(merged));
+        }
+        applyFavorites(state.articles);
+        render();
+        setFavoritesStatus("收藏已匯入");
+      } catch (error) {
+        console.error(error);
+        setFavoritesStatus("匯入失敗，請確認檔案格式。");
+      } finally {
+        importFavoritesInput.value = "";
+      }
+    };
+    reader.readAsText(file);
+  });
+}
 
 loadArticles();

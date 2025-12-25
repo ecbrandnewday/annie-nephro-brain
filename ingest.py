@@ -34,18 +34,40 @@ MONTH_MAP = {
 
 def fetch_article_ids(journal, start_date, end_date, max_per_journal):
     query = f'"{journal}"[Journal]'
-    params = {
+    base_params = {
         "db": "pubmed",
         "term": query,
-        "retmax": max_per_journal,
         "datetype": "pdat",
         "mindate": start_date.strftime("%Y/%m/%d"),
         "maxdate": end_date.strftime("%Y/%m/%d"),
     }
-    response = requests.get(f"{BASE_URL}/esearch.fcgi", params=params, timeout=30)
-    response.raise_for_status()
-    root = ET.fromstring(response.text)
-    return [el.text for el in root.findall(".//Id") if el.text]
+    if max_per_journal and max_per_journal > 0:
+        params = {**base_params, "retmax": max_per_journal}
+        response = requests.get(f"{BASE_URL}/esearch.fcgi", params=params, timeout=30)
+        response.raise_for_status()
+        root = ET.fromstring(response.text)
+        return [el.text for el in root.findall(".//Id") if el.text]
+
+    count_params = {**base_params, "retmax": 0}
+    count_response = requests.get(
+        f"{BASE_URL}/esearch.fcgi", params=count_params, timeout=30
+    )
+    count_response.raise_for_status()
+    count_root = ET.fromstring(count_response.text)
+    count_text = count_root.findtext(".//Count", "0")
+    total = int(count_text) if count_text.isdigit() else 0
+    if total == 0:
+        return []
+
+    batch_size = 200
+    ids = []
+    for retstart in range(0, total, batch_size):
+        params = {**base_params, "retmax": batch_size, "retstart": retstart}
+        response = requests.get(f"{BASE_URL}/esearch.fcgi", params=params, timeout=30)
+        response.raise_for_status()
+        root = ET.fromstring(response.text)
+        ids.extend([el.text for el in root.findall(".//Id") if el.text])
+    return ids
 
 
 def fetch_article_details(pmids):
