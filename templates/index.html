@@ -29,8 +29,15 @@
     <main class="layout">
       <section class="panel list-panel">
         <div class="panel-header">
-          <h2>今日更新</h2>
-          <p class="muted" id="result-count"></p>
+          <div>
+            <h2>今日更新</h2>
+            <p class="muted" id="result-count"></p>
+          </div>
+          <div class="date-filter">
+            <input type="date" id="date-input" />
+            <button class="ghost small" id="date-search">查詢</button>
+            <button class="ghost small" id="date-today">今天</button>
+          </div>
         </div>
         <div class="tag-row" id="tag-row"></div>
         <div class="list" id="article-list"></div>

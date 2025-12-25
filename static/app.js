@@ -11,6 +11,9 @@ const tagRowEl = document.getElementById("tag-row");
 const resultCountEl = document.getElementById("result-count");
 const dateChipEl = document.getElementById("today-date");
 const refreshBtn = document.getElementById("refresh-btn");
+const dateInputEl = document.getElementById("date-input");
+const dateSearchBtn = document.getElementById("date-search");
+const dateTodayBtn = document.getElementById("date-today");
 const todayLabelEl = document.getElementById("today-label");
 const lastSyncEl = document.getElementById("last-sync");
 const syncStatusEl = document.getElementById("sync-status");
@@ -125,7 +128,7 @@ const renderDetail = () => {
         </div>
       </div>
       <button class="favorite-btn ${article.favorite ? "saved" : ""}" id="favorite-btn">
-        ${article.favorite ? "已收藏" : "收藏"}
+        ${article.favorite ? "取消收藏" : "收藏"}
       </button>
     </div>
     <div class="section">
@@ -178,14 +181,18 @@ const render = () => {
 };
 
 const updateSyncInfo = (lastSync, statusText) => {
-  if (lastSync) {
-    const date = new Date(lastSync);
-    const localized = Number.isNaN(date.getTime())
-      ? lastSync
-      : date.toLocaleString("zh-TW", { timeZone: TAIWAN_TZ });
-    lastSyncEl.textContent = `最後同步：${localized}`;
-  } else {
-    lastSyncEl.textContent = "";
+  if (typeof lastSync !== "undefined") {
+    if (lastSync) {
+      const normalized =
+        /[zZ]|[+-]\d{2}:\d{2}$/.test(lastSync) ? lastSync : `${lastSync}Z`;
+      const date = new Date(normalized);
+      const localized = Number.isNaN(date.getTime())
+        ? lastSync
+        : date.toLocaleString("zh-TW", { timeZone: TAIWAN_TZ });
+      lastSyncEl.textContent = `最後同步：${localized}`;
+    } else {
+      lastSyncEl.textContent = "";
+    }
   }
   syncStatusEl.textContent = statusText || "";
 };
@@ -202,6 +209,27 @@ const getTaiwanDate = () => {
   const month = parts.find((part) => part.type === "month")?.value;
   const day = parts.find((part) => part.type === "day")?.value;
   return year && month && day ? `${year}-${month}-${day}` : "";
+};
+
+const loadArticlesForDate = async (dateValue) => {
+  if (!dateValue) {
+    await loadArticles();
+    return;
+  }
+  const response = await fetch(`/api/articles?date=${dateValue}`);
+  const data = await response.json();
+  state.articles = data.articles;
+  state.dateLabel = dateValue;
+  state.selectedId = state.articles[0] ? state.articles[0].id : null;
+  dateChipEl.textContent = `查詢日期 ${state.dateLabel}`;
+  updateSyncInfo(
+    data.last_sync,
+    data.articles.length ? "" : "該日期無文章。"
+  );
+  if (dateInputEl) {
+    dateInputEl.value = dateValue;
+  }
+  render();
 };
 
 const loadArticles = async (statusOverride) => {
@@ -225,6 +253,9 @@ const loadArticles = async (statusOverride) => {
   state.selectedId = state.articles[0] ? state.articles[0].id : null;
   dateChipEl.textContent = `更新至 ${state.dateLabel}`;
   todayLabelEl.textContent = `今日日期：${today}`;
+  if (dateInputEl) {
+    dateInputEl.value = today;
+  }
   updateSyncInfo(data.last_sync, statusText);
   render();
 };
@@ -249,6 +280,20 @@ refreshBtn.addEventListener("click", async () => {
     refreshBtn.disabled = false;
     refreshBtn.textContent = "更新";
   }
+});
+
+if (dateInputEl) {
+  dateInputEl.value = getTaiwanDate();
+}
+
+dateSearchBtn.addEventListener("click", () => {
+  loadArticlesForDate(dateInputEl.value);
+});
+
+dateTodayBtn.addEventListener("click", () => {
+  const today = getTaiwanDate();
+  dateInputEl.value = today;
+  loadArticlesForDate(today);
 });
 
 loadArticles();

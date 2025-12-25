@@ -1,11 +1,11 @@
 import json
 import os
-from datetime import date
+from datetime import date, datetime
 
 from flask import Flask, jsonify, render_template, request
 
 from db import get_db, get_meta, init_db
-from ingest import DEFAULT_JOURNALS, run_ingest
+from ingest import DEFAULT_JOURNALS, run_ingest, run_ingest_range
 
 app = Flask(__name__)
 
@@ -131,10 +131,38 @@ def toggle_favorite(article_id):
 
 @app.route("/api/refresh", methods=["POST"])
 def refresh_articles():
+    date_str = request.args.get("date")
+    start_str = request.args.get("start")
+    end_str = request.args.get("end")
     days = int(request.args.get("days", 3))
     max_per_journal = int(request.args.get("max_per_journal", 5))
-    stored = run_ingest(DEFAULT_JOURNALS, days, max_per_journal)
-    return jsonify({"stored": stored})
+    if start_str or end_str:
+        if not (start_str and end_str):
+            return jsonify({"error": "start and end required"}), 400
+        try:
+            start_date = datetime.strptime(start_str, "%Y-%m-%d").date()
+            end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
+        except ValueError:
+            return jsonify({"error": "invalid date range"}), 400
+        if start_date > end_date:
+            return jsonify({"error": "start after end"}), 400
+        stored = run_ingest_range(
+            DEFAULT_JOURNALS, start_date, end_date, max_per_journal
+        )
+    elif date_str:
+        try:
+            target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            return jsonify({"error": "invalid date"}), 400
+        stored = run_ingest_range(
+            DEFAULT_JOURNALS, target_date, target_date, max_per_journal
+        )
+    else:
+        stored = run_ingest(DEFAULT_JOURNALS, days, max_per_journal)
+    conn = get_db()
+    last_sync = get_meta(conn, "last_sync")
+    conn.close()
+    return jsonify({"stored": stored, "last_sync": last_sync})
 
 
 if __name__ == "__main__":

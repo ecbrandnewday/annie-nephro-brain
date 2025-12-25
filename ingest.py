@@ -1,7 +1,7 @@
 import argparse
 import json
 import os
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from xml.etree import ElementTree as ET
 
 import requests
@@ -160,11 +160,9 @@ def upsert_article(conn, article):
     conn.commit()
 
 
-def run_ingest(journals, days, max_per_journal):
+def run_ingest_range(journals, start_date, end_date, max_per_journal):
     init_db()
     conn = get_db()
-    start_date = date.today() - timedelta(days=days)
-    end_date = date.today()
     stored = 0
     for journal in journals:
         pmids = fetch_article_ids(journal, start_date, end_date, max_per_journal)
@@ -194,9 +192,15 @@ def run_ingest(journals, days, max_per_journal):
             )
             upsert_article(conn, parsed)
             stored += 1
-    set_meta(conn, "last_sync", datetime.utcnow().isoformat())
+    set_meta(conn, "last_sync", datetime.now(timezone.utc).isoformat())
     conn.close()
     return stored
+
+
+def run_ingest(journals, days, max_per_journal):
+    start_date = date.today() - timedelta(days=days)
+    end_date = date.today()
+    return run_ingest_range(journals, start_date, end_date, max_per_journal)
 
 
 def main():
