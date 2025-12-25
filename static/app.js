@@ -286,8 +286,30 @@ if (dateInputEl) {
   dateInputEl.value = getTaiwanDate();
 }
 
-dateSearchBtn.addEventListener("click", () => {
-  loadArticlesForDate(dateInputEl.value);
+dateSearchBtn.addEventListener("click", async () => {
+  const selectedDate = dateInputEl.value;
+  if (!selectedDate) {
+    updateSyncInfo(undefined, "請先選擇日期。");
+    return;
+  }
+  dateSearchBtn.disabled = true;
+  dateSearchBtn.textContent = "查詢中...";
+  try {
+    const response = await fetch(`/api/refresh?date=${selectedDate}`, {
+      method: "POST",
+    });
+    const data = await response.json();
+    const message =
+      response.ok && data.stored === 0 ? "該日期無新文章。" : "";
+    await loadArticlesForDate(selectedDate);
+    updateSyncInfo(data.last_sync, message);
+  } catch (error) {
+    console.error(error);
+    updateSyncInfo(undefined, "查詢失敗，請稍後再試。");
+  } finally {
+    dateSearchBtn.disabled = false;
+    dateSearchBtn.textContent = "查詢";
+  }
 });
 
 dateTodayBtn.addEventListener("click", () => {
