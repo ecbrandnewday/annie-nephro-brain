@@ -1,9 +1,11 @@
 import json
+import os
 from datetime import date
 
 from flask import Flask, jsonify, render_template, request
 
-from db import get_db, init_db
+from db import get_db, get_meta, init_db
+from ingest import DEFAULT_JOURNALS, run_ingest
 
 app = Flask(__name__)
 
@@ -56,6 +58,7 @@ def list_articles():
     query += " ORDER BY publish_date DESC"
     rows = conn.execute(query, params).fetchall()
     favorites = get_favorites(conn)
+    last_sync = get_meta(conn, "last_sync")
     conn.close()
     articles = []
     for row in rows:
@@ -66,7 +69,19 @@ def list_articles():
         articles = [a for a in articles if tag in a["tags"]]
     if limit:
         articles = articles[:limit]
-    return jsonify({"date": selected_date or date.today().isoformat(), "articles": articles})
+    if selected_date:
+        effective_date = selected_date
+    elif articles:
+        effective_date = articles[0]["publish_date"]
+    else:
+        effective_date = date.today().isoformat()
+    return jsonify(
+        {
+            "date": effective_date,
+            "last_sync": last_sync,
+            "articles": articles,
+        }
+    )
 
 
 @app.route("/api/articles/<article_id>")
@@ -114,6 +129,15 @@ def toggle_favorite(article_id):
     return jsonify({"favorite": favorite})
 
 
+@app.route("/api/refresh", methods=["POST"])
+def refresh_articles():
+    days = int(request.args.get("days", 3))
+    max_per_journal = int(request.args.get("max_per_journal", 5))
+    stored = run_ingest(DEFAULT_JOURNALS, days, max_per_journal)
+    return jsonify({"stored": stored})
+
+
 if __name__ == "__main__":
     init_db()
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)

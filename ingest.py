@@ -7,7 +7,7 @@ from xml.etree import ElementTree as ET
 import requests
 
 from ai import infer_tags, impact_assessment, pico_from_text, summarize
-from db import get_db, init_db
+from db import get_db, init_db, set_meta
 
 BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 DEFAULT_JOURNALS = [
@@ -194,6 +194,7 @@ def run_ingest(journals, days, max_per_journal):
             )
             upsert_article(conn, parsed)
             stored += 1
+    set_meta(conn, "last_sync", datetime.utcnow().isoformat())
     conn.close()
     return stored
 

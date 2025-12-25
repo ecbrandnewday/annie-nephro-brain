@@ -11,6 +11,10 @@ const tagRowEl = document.getElementById("tag-row");
 const resultCountEl = document.getElementById("result-count");
 const dateChipEl = document.getElementById("today-date");
 const refreshBtn = document.getElementById("refresh-btn");
+const todayLabelEl = document.getElementById("today-label");
+const lastSyncEl = document.getElementById("last-sync");
+const syncStatusEl = document.getElementById("sync-status");
+const TAIWAN_TZ = "Asia/Taipei";
 
 const escapeHtml = (text) =>
   (text || "")
@@ -173,21 +177,78 @@ const render = () => {
   renderDetail();
 };
 
-const loadArticles = async () => {
-  const today = new Date().toISOString().slice(0, 10);
+const updateSyncInfo = (lastSync, statusText) => {
+  if (lastSync) {
+    const date = new Date(lastSync);
+    const localized = Number.isNaN(date.getTime())
+      ? lastSync
+      : date.toLocaleString("zh-TW", { timeZone: TAIWAN_TZ });
+    lastSyncEl.textContent = `最後同步：${localized}`;
+  } else {
+    lastSyncEl.textContent = "";
+  }
+  syncStatusEl.textContent = statusText || "";
+};
+
+const getTaiwanDate = () => {
+  const formatter = new Intl.DateTimeFormat("zh-TW", {
+    timeZone: TAIWAN_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = formatter.formatToParts(new Date());
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  return year && month && day ? `${year}-${month}-${day}` : "";
+};
+
+const loadArticles = async (statusOverride) => {
+  const today = getTaiwanDate() || new Date().toISOString().slice(0, 10);
+  let statusText = statusOverride || "";
   let response = await fetch(`/api/articles?date=${today}`);
   let data = await response.json();
   if (!data.articles.length) {
     response = await fetch("/api/articles");
     data = await response.json();
+    if (!statusOverride) {
+      if (data.articles.length) {
+        statusText = "今日無新文章，已顯示最新日期。";
+      } else {
+        statusText = "目前沒有可顯示的文章。";
+      }
+    }
   }
   state.articles = data.articles;
   state.dateLabel = data.date || today;
   state.selectedId = state.articles[0] ? state.articles[0].id : null;
-  dateChipEl.textContent = state.dateLabel;
+  dateChipEl.textContent = `更新至 ${state.dateLabel}`;
+  todayLabelEl.textContent = `今日日期：${today}`;
+  updateSyncInfo(data.last_sync, statusText);
   render();
 };
 
-refreshBtn.addEventListener("click", loadArticles);
+refreshBtn.addEventListener("click", async () => {
+  refreshBtn.disabled = true;
+  refreshBtn.textContent = "更新中...";
+  let handled = false;
+  try {
+    const response = await fetch("/api/refresh", { method: "POST" });
+    const data = await response.json();
+    if (data.stored === 0) {
+      await loadArticles("今日無新文章，已顯示最新日期。");
+      handled = true;
+    }
+  } catch (error) {
+    console.error(error);
+  } finally {
+    if (!handled) {
+      await loadArticles();
+    }
+    refreshBtn.disabled = false;
+    refreshBtn.textContent = "更新";
+  }
+});
 
 loadArticles();

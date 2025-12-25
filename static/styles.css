@@ -72,8 +72,24 @@ body {
 
 .hero-actions {
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.hero-actions-row {
+  display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.sync-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  max-width: 260px;
+  text-align: right;
 }
 
 .date-chip {
@@ -312,6 +328,15 @@ h2 {
   .hero {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .hero-actions {
+    align-items: flex-start;
+  }
+
+  .sync-info {
+    align-items: flex-start;
+    text-align: left;
   }
 
   .layout {
