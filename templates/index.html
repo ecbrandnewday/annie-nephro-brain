@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Nephro Brain｜腎臟科 AI 知識管家</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <div class="ambient"></div>
+    <header class="hero">
+      <div class="brand">
+        <span class="badge">MVP</span>
+        <h1>Nephro Brain</h1>
+        <p>每日腎臟科文獻整理，3 分鐘完成初步判讀。</p>
+      </div>
+      <div class="hero-actions">
+        <div class="date-chip" id="today-date">載入中</div>
+        <button class="ghost" id="refresh-btn">更新</button>
+      </div>
+    </header>
+    <main class="layout">
+      <section class="panel list-panel">
+        <div class="panel-header">
+          <h2>今日更新</h2>
+          <p class="muted" id="result-count"></p>
+        </div>
+        <div class="tag-row" id="tag-row"></div>
+        <div class="list" id="article-list"></div>
+      </section>
+      <section class="panel detail-panel">
+        <div id="detail">
+          <div class="empty-state">
+            選擇文章以查看重點摘要、PICO 與臨床影響。
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer class="footer">
+      <span class="muted">非臨床建議。</span>
+      <span class="muted">MVP 採用規則式摘要，正式版請改用 LLM。</span>
+    </footer>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>
