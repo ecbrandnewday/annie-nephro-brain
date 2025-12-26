@@ -4,6 +4,7 @@ from datetime import date, datetime
 
 from flask import Flask, jsonify, render_template, request
 
+from ai import build_framework_summary, summarize, translate_title
 from db import get_db, get_meta, init_db
 from ingest import DEFAULT_JOURNALS, run_ingest, run_ingest_range
 
@@ -11,25 +12,24 @@ app = Flask(__name__)
 
 
 def row_to_dict(row):
+    tags = json.loads(row["tags"]) if row["tags"] else []
+    summary = summarize(row["title"], row["abstract"], tags)
+    title_zh = translate_title(row["title"])
+    if title_zh == "UNKNOWN":
+        title_zh = None
     return {
         "id": row["id"],
         "title": row["title"],
+        "title_zh": title_zh,
         "abstract": row["abstract"],
         "journal": row["journal"],
         "publish_date": row["publish_date"],
         "url": row["url"],
-        "tags": json.loads(row["tags"]) if row["tags"] else [],
-        "key_takeaway": row["key_takeaway"],
-        "study_type": row["study_type"],
-        "primary_outcome": row["primary_outcome"],
-        "outcome_direction": row["outcome_direction"],
-        "pico": {
-            "P": row["pico_p"],
-            "I": row["pico_i"],
-            "C": row["pico_c"],
-            "O": row["pico_o"],
-        },
-        "impact": {"level": row["impact_level"], "reason": row["impact_reason"]},
+        "tags": tags,
+        "key_takeaway": summary["key_takeaway"],
+        "study_type": summary["study_type"],
+        "primary_outcome": summary["primary_outcome"],
+        "outcome_direction": summary["outcome_direction"],
     }
 
 
@@ -42,12 +42,32 @@ def index():
 def list_articles():
     init_db()
     selected_date = request.args.get("date")
+    start_str = request.args.get("start")
+    end_str = request.args.get("end")
     tag = request.args.get("tag")
     limit = int(request.args.get("limit", 50))
     conn = get_db()
     query = "SELECT * FROM articles"
     params = []
-    if selected_date:
+    if start_str or end_str:
+        if not (start_str and end_str):
+            conn.close()
+            return jsonify({"error": "start and end required"}), 400
+        try:
+            start_date = datetime.strptime(start_str, "%Y-%m-%d").date()
+            end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
+        except ValueError:
+            conn.close()
+            return jsonify({"error": "invalid date range"}), 400
+        if start_date > end_date:
+            conn.close()
+            return jsonify({"error": "start after end"}), 400
+        if (end_date - start_date).days + 1 > 30:
+            conn.close()
+            return jsonify({"error": "range too long"}), 400
+        query += " WHERE publish_date BETWEEN ? AND ?"
+        params.extend([start_str, end_str])
+    elif selected_date:
         query += " WHERE publish_date = ?"
         params.append(selected_date)
     query += " ORDER BY publish_date DESC"
@@ -62,7 +82,9 @@ def list_articles():
         articles = [a for a in articles if tag in a["tags"]]
     if limit:
         articles = articles[:limit]
-    if selected_date:
+    if start_str and end_str:
+        effective_date = end_str
+    elif selected_date:
         effective_date = selected_date
     elif articles:
         effective_date = articles[0]["publish_date"]
@@ -71,6 +93,7 @@ def list_articles():
     return jsonify(
         {
             "date": effective_date,
+            "range": {"start": start_str, "end": end_str} if start_str and end_str else None,
             "last_sync": last_sync,
             "articles": articles,
         }
@@ -87,6 +110,18 @@ def get_article(article_id):
         return jsonify({"error": "Not found"}), 404
     article = row_to_dict(row)
     return jsonify(article)
+
+
+@app.route("/api/articles/<article_id>/summary", methods=["POST"])
+def get_article_summary(article_id):
+    init_db()
+    conn = get_db()
+    row = conn.execute("SELECT * FROM articles WHERE id = ?", (article_id,)).fetchone()
+    conn.close()
+    if row is None:
+        return jsonify({"error": "Not found"}), 404
+    summary = build_framework_summary(row["abstract"] or "")
+    return jsonify(summary)
 
 
 @app.route("/api/refresh", methods=["POST"])
@@ -107,6 +142,8 @@ def refresh_articles():
             return jsonify({"error": "invalid date range"}), 400
         if start_date > end_date:
             return jsonify({"error": "start after end"}), 400
+        if (end_date - start_date).days + 1 > 30:
+            return jsonify({"error": "range too long"}), 400
         stored = run_ingest_range(
             DEFAULT_JOURNALS, start_date, end_date, max_per_journal
         )

@@ -12,8 +12,16 @@ from db import get_db, init_db, set_meta
 BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 DEFAULT_JOURNALS = [
     "New England Journal of Medicine",
-    "JAMA",
+    "Nature Reviews Nephrology",
     "Kidney International",
+    "Journal of the American Society of Nephrology",
+    "American Journal of Kidney Diseases",
+    "Clinical Journal of the American Society of Nephrology",
+    "Nephrology Dialysis Transplantation",
+    "Kidney International Reports",
+    "American Journal of Nephrology",
+    "Clinical Kidney Journal",
+    "Journal of Nephrology",
 ]
 
 MONTH_MAP = {
@@ -30,6 +38,24 @@ MONTH_MAP = {
     "nov": "11",
     "dec": "12",
 }
+
+MISSING_ABSTRACT_MARKERS = [
+    "no abstract available",
+    "abstract not available",
+]
+
+
+def _is_missing_abstract(text):
+    if not text:
+        return True
+    normalized = text.strip().lower()
+    return any(marker in normalized for marker in MISSING_ABSTRACT_MARKERS)
+
+
+def _node_text(node):
+    if node is None:
+        return ""
+    return "".join(node.itertext()).strip()
 
 
 def fetch_article_ids(journal, start_date, end_date, max_per_journal):
@@ -106,13 +132,24 @@ def parse_pub_date(article_node):
 
 def parse_article(article_node):
     pmid = article_node.findtext(".//PMID")
-    title = article_node.findtext(".//ArticleTitle") or "Untitled"
-    abstract_parts = [
-        node.text.strip()
-        for node in article_node.findall(".//AbstractText")
-        if node.text
-    ]
-    abstract = " ".join(abstract_parts)
+    title_node = article_node.find(".//ArticleTitle")
+    title = _node_text(title_node) or "Untitled"
+    abstract_parts = []
+    for node in article_node.findall(".//AbstractText"):
+        text = _node_text(node)
+        if _is_missing_abstract(text):
+            continue
+        label = node.attrib.get("Label") or node.attrib.get("NlmCategory")
+        if label and label.upper() == "UNASSIGNED":
+            label = None
+        if label:
+            label_text = label.strip().title()
+            abstract_parts.append(f"{label_text}: {text}")
+        else:
+            abstract_parts.append(text)
+    abstract = "\n\n".join(abstract_parts)
+    if not abstract:
+        return None
     journal = article_node.findtext(".//Journal/Title") or "Unknown journal"
     publish_date = parse_pub_date(article_node)
     url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
@@ -192,6 +229,8 @@ def run_ingest_range(journals, start_date, end_date, max_per_journal):
             continue
         for article_node in fetch_article_details(pmids):
             parsed = parse_article(article_node)
+            if not parsed:
+                continue
             tags = infer_tags(parsed["title"], parsed["abstract"])
             summary = summarize(parsed["title"], parsed["abstract"], tags)
             pico = pico_from_text(
