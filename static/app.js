@@ -55,91 +55,27 @@ const renderSummaryText = (text) => {
   return lines.map((line) => `<p>${escapeHtml(line)}</p>`).join("");
 };
 
-const FRAMEWORK_LABELS = {
-  TREATMENT_PICO: "治療／策略（PICO）",
-  DIAG_OR_ETIOLOGY_FRAME: "診斷／病因／預後",
-  MECHANISTIC_PRECLINICAL: "機轉／前臨床",
-  REVIEW_GUIDELINE: "回顧／指南",
-  OBSERVATIONAL_ASSOCIATION: "觀察性關聯",
-  OTHER: "其他",
+const SUMMARY_FORMAT_LABELS = {
+  PICO: "PICO",
+  STRUCTURED_SUMMARY: "結構化摘要",
 };
 
-const SECTION_LABELS = {
-  framework_reason: "分類理由",
-  P: "P（Population）",
-  I: "I（Intervention / Exposure）",
-  C: "C（Comparison）",
-  O_primary: "O（Primary）",
-  O_secondary: "O（Secondary）",
-  O_safety: "O（Safety）",
-  O: "O（Outcome）",
-  Implication: "Implication",
-  Model: "Model",
-  Manipulation: "Manipulation",
-  Readouts: "Readouts",
-  Mechanism: "Mechanism",
-  "So what": "So what",
-  "Exposure/Marker": "Exposure/Marker",
-  Outcomes: "Outcomes",
-  "Key results": "Key results",
-  "Confounding/limits": "Confounding/limits",
-  Scope: "Scope",
-  "Data sources": "Data sources",
-  "Key conclusions": "Key conclusions",
-  "Evidence strength": "Evidence strength",
-  key_points: "重點整理",
-};
+const PICO_SECTIONS = [
+  { key: "P", label: "P（Population）" },
+  { key: "I", label: "I（Intervention）" },
+  { key: "C", label: "C（Comparison）" },
+  { key: "O_primary", label: "O（Primary）" },
+  { key: "O_secondary", label: "O（Secondary）" },
+  { key: "O_safety", label: "O（Safety）" },
+];
 
-const MECHANISTIC_SECTION_LABELS = {
-  P: "P（模型/樣本）",
-  I: "I（操作/介入）",
-  C: "C（對照）",
-  O: "O（Readouts）",
-};
-
-const SECTION_ORDER = {
-  TREATMENT_PICO: [
-    "framework_reason",
-    "P",
-    "I",
-    "C",
-    "O_primary",
-    "O_secondary",
-    "O_safety",
-  ],
-  DIAG_OR_ETIOLOGY_FRAME: [
-    "framework_reason",
-    "P",
-    "I",
-    "C",
-    "O",
-    "Implication",
-  ],
-  MECHANISTIC_PRECLINICAL: [
-    "framework_reason",
-    "P",
-    "I",
-    "C",
-    "O",
-  ],
-  OBSERVATIONAL_ASSOCIATION: [
-    "framework_reason",
-    "P",
-    "Exposure/Marker",
-    "Outcomes",
-    "Key results",
-    "Confounding/limits",
-    "So what",
-  ],
-  REVIEW_GUIDELINE: [
-    "framework_reason",
-    "Scope",
-    "Data sources",
-    "Key conclusions",
-    "Evidence strength",
-  ],
-  OTHER: ["framework_reason", "key_points"],
-};
+const STRUCTURED_SECTIONS = [
+  { key: "design", label: "研究設計" },
+  { key: "methods", label: "方法" },
+  { key: "results", label: "主要發現" },
+  { key: "implications", label: "臨床含義" },
+  { key: "limitations", label: "限制" },
+];
 
 const renderSummarySection = (title, items) => {
   const safeItems = Array.isArray(items) ? items : [String(items || "UNKNOWN")];
@@ -165,26 +101,21 @@ const renderSummaryPayload = (summary) => {
   if (!summary || typeof summary !== "object") {
     return renderSummaryText(summary);
   }
-  const framework = summary.framework || "UNKNOWN";
+  const format = summary.format || "STRUCTURED_SUMMARY";
   const oneLiner = summary.one_liner || "UNKNOWN";
-  const sections =
-    summary.sections && typeof summary.sections === "object" ? summary.sections : {};
   const qualityFlags = Array.isArray(summary.quality_flags)
     ? summary.quality_flags
     : [];
 
-  const order = SECTION_ORDER[framework] || Object.keys(sections);
-  const orderedKeys = [
-    ...order,
-    ...Object.keys(sections).filter((key) => !order.includes(key)),
-  ].filter((key) => typeof sections[key] !== "undefined");
+  const pico = summary.pico && typeof summary.pico === "object" ? summary.pico : {};
+  const structured =
+    summary.summary && typeof summary.summary === "object" ? summary.summary : {};
 
-  const labelMap =
-    framework === "MECHANISTIC_PRECLINICAL"
-      ? { ...SECTION_LABELS, ...MECHANISTIC_SECTION_LABELS }
-      : SECTION_LABELS;
-  const sectionHtml = orderedKeys
-    .map((key) => renderSummarySection(labelMap[key] || key, sections[key]))
+  const sections = format === "PICO" ? PICO_SECTIONS : STRUCTURED_SECTIONS;
+  const sectionHtml = sections
+    .map(({ key, label }) =>
+      renderSummarySection(label, format === "PICO" ? pico[key] : structured[key])
+    )
     .join("");
 
   const qualityHtml = qualityFlags.length
@@ -195,8 +126,8 @@ const renderSummaryPayload = (summary) => {
 
   return `
     <div class="summary-meta">
-      <div class="summary-framework">框架：${escapeHtml(
-        FRAMEWORK_LABELS[framework] || framework
+      <div class="summary-framework">格式：${escapeHtml(
+        SUMMARY_FORMAT_LABELS[format] || format
       )}</div>
       <div class="summary-one-liner">${escapeHtml(oneLiner)}</div>
     </div>

@@ -4,8 +4,8 @@ from datetime import date, datetime
 
 from flask import Flask, jsonify, render_template, request
 
-from ai import build_framework_summary, summarize, translate_title
-from db import get_db, get_meta, init_db
+from ai import summarize, summarize_article_with_openai, translate_title
+from db import get_article_summary as get_cached_summary, get_db, get_meta, init_db, upsert_article_summary
 from ingest import DEFAULT_JOURNALS, run_ingest, run_ingest_range
 
 app = Flask(__name__)
@@ -45,7 +45,7 @@ def list_articles():
     start_str = request.args.get("start")
     end_str = request.args.get("end")
     tag = request.args.get("tag")
-    limit = int(request.args.get("limit", 50))
+    limit = int(request.args.get("limit", 200))
     conn = get_db()
     query = "SELECT * FROM articles"
     params = []
@@ -117,10 +117,21 @@ def get_article_summary(article_id):
     init_db()
     conn = get_db()
     row = conn.execute("SELECT * FROM articles WHERE id = ?", (article_id,)).fetchone()
-    conn.close()
     if row is None:
+        conn.close()
         return jsonify({"error": "Not found"}), 404
-    summary = build_framework_summary(row["abstract"] or "")
+    cached = get_cached_summary(conn, article_id)
+    if cached:
+        try:
+            payload = json.loads(cached)
+        except json.JSONDecodeError:
+            payload = None
+        if payload:
+            conn.close()
+            return jsonify(payload)
+    summary = summarize_article_with_openai(row["title"], row["abstract"] or "")
+    upsert_article_summary(conn, article_id, json.dumps(summary, ensure_ascii=False), datetime.utcnow().isoformat())
+    conn.close()
     return jsonify(summary)
 
 
@@ -144,6 +155,8 @@ def refresh_articles():
             return jsonify({"error": "start after end"}), 400
         if (end_date - start_date).days + 1 > 30:
             return jsonify({"error": "range too long"}), 400
+        if max_param is None:
+            max_per_journal = 0
         stored = run_ingest_range(
             DEFAULT_JOURNALS, start_date, end_date, max_per_journal
         )

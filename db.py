@@ -46,6 +46,15 @@ def init_db():
         )
         """
     )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS article_summaries (
+            article_id TEXT PRIMARY KEY,
+            summary_json TEXT,
+            updated_at TEXT
+        )
+        """
+    )
     conn.commit()
     conn.close()
 
@@ -63,5 +72,27 @@ def set_meta(conn, key, value):
         ON CONFLICT(key) DO UPDATE SET value = excluded.value
         """,
         (key, value),
+    )
+    conn.commit()
+
+
+def get_article_summary(conn, article_id):
+    row = conn.execute(
+        "SELECT summary_json FROM article_summaries WHERE article_id = ?",
+        (article_id,),
+    ).fetchone()
+    return row["summary_json"] if row else None
+
+
+def upsert_article_summary(conn, article_id, summary_json, updated_at):
+    conn.execute(
+        """
+        INSERT INTO article_summaries (article_id, summary_json, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(article_id) DO UPDATE SET
+            summary_json = excluded.summary_json,
+            updated_at = excluded.updated_at
+        """,
+        (article_id, summary_json, updated_at),
     )
     conn.commit()

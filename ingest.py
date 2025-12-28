@@ -12,7 +12,11 @@ from db import get_db, init_db, set_meta
 BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 DEFAULT_JOURNALS = [
     "New England Journal of Medicine",
+    "N Engl J Med",
     "Nature Reviews Nephrology",
+    "Seminars in Nephrology",
+    "Current Opinion in Nephrology and Hypertension",
+    "Advances in Chronic Kidney Disease",
     "Kidney International",
     "Journal of the American Society of Nephrology",
     "American Journal of Kidney Diseases",
