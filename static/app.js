@@ -55,86 +55,88 @@ const renderSummaryText = (text) => {
   return lines.map((line) => `<p>${escapeHtml(line)}</p>`).join("");
 };
 
-const SUMMARY_FORMAT_LABELS = {
-  PICO: "PICO",
-  STRUCTURED_SUMMARY: "結構化摘要",
-};
-
-const PICO_SECTIONS = [
-  { key: "P", label: "P（Population）" },
-  { key: "I", label: "I（Intervention）" },
-  { key: "C", label: "C（Comparison）" },
-  { key: "O_primary", label: "O（Primary）" },
-  { key: "O_secondary", label: "O（Secondary）" },
-  { key: "O_safety", label: "O（Safety）" },
-];
-
-const STRUCTURED_SECTIONS = [
-  { key: "design", label: "研究設計" },
-  { key: "methods", label: "方法" },
-  { key: "results", label: "主要發現" },
-  { key: "implications", label: "臨床含義" },
-  { key: "limitations", label: "限制" },
-];
-
-const renderSummarySection = (title, items) => {
-  const safeItems = Array.isArray(items) ? items : [String(items || "UNKNOWN")];
-  return `
-    <div class="summary-section">
-      <div class="summary-section-title">${escapeHtml(title)}</div>
-      <ul class="summary-list">
-        ${safeItems
-          .map((item, idx) => {
-            return `
-              <li>
-                <div class="summary-item">${escapeHtml(item)}</div>
-              </li>
-            `;
-          })
-          .join("")}
-      </ul>
-    </div>
-  `;
-};
 
 const renderSummaryPayload = (summary) => {
-  if (!summary || typeof summary !== "object") {
-    return renderSummaryText(summary);
+  if (summary && typeof summary === "object") {
+    return renderSummaryText(summary.summary || "UNKNOWN");
   }
-  const format = summary.format || "STRUCTURED_SUMMARY";
-  const oneLiner = summary.one_liner || "UNKNOWN";
-  const qualityFlags = Array.isArray(summary.quality_flags)
-    ? summary.quality_flags
-    : [];
-
-  const pico = summary.pico && typeof summary.pico === "object" ? summary.pico : {};
-  const structured =
-    summary.summary && typeof summary.summary === "object" ? summary.summary : {};
-
-  const sections = format === "PICO" ? PICO_SECTIONS : STRUCTURED_SECTIONS;
-  const sectionHtml = sections
-    .map(({ key, label }) =>
-      renderSummarySection(label, format === "PICO" ? pico[key] : structured[key])
-    )
-    .join("");
-
-  const qualityHtml = qualityFlags.length
-    ? `<div class="summary-flags">品質標記：${qualityFlags
-        .map((flag) => escapeHtml(flag))
-        .join("、")}</div>`
-    : "";
-
-  return `
-    <div class="summary-meta">
-      <div class="summary-framework">格式：${escapeHtml(
-        SUMMARY_FORMAT_LABELS[format] || format
-      )}</div>
-      <div class="summary-one-liner">${escapeHtml(oneLiner)}</div>
-    </div>
-    ${sectionHtml || "<p>UNKNOWN</p>"}
-    ${qualityHtml}
-  `;
+  const parsed = parsePicoSummary(summary || "");
+  if (parsed) {
+    return renderPicoSummary(parsed);
+  }
+  return renderSummaryText(summary);
 };
+
+const parsePicoSummary = (text) => {
+  const lines = String(text || "")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.replace(/^[-•]\s*/, "").trim());
+  if (!lines.length) return null;
+  let keyTakeaway = "";
+  const pico = { P: [], I: [], C: [], O: [] };
+  for (const line of lines) {
+    if (
+      line.startsWith("重點結論：") ||
+      line.toLowerCase().startsWith("key takeaway:")
+    ) {
+      keyTakeaway = line.split(/：|:/).slice(1).join("：").trim();
+      continue;
+    }
+    const match = line.match(/^([PICO])\s*[:：]\s*(.+)$/i);
+    if (match) {
+      const key = match[1].toUpperCase();
+      const value = match[2].trim();
+      if (pico[key]) {
+        pico[key].push(value || "UNKNOWN");
+      }
+    }
+  }
+  const hasPico = Object.values(pico).some((items) => items.length);
+  if (!keyTakeaway && !hasPico) return null;
+  if (!keyTakeaway) keyTakeaway = "UNKNOWN";
+  ["P", "I", "C", "O"].forEach((key) => {
+    if (!pico[key].length) pico[key].push("UNKNOWN");
+  });
+  return { keyTakeaway, pico };
+};
+
+const renderPicoSummary = ({ keyTakeaway, pico }) => `
+  <div class="analysis-panel">
+    <div class="analysis-takeaway">
+      <div class="analysis-label">重點結論</div>
+      <div class="analysis-body">${escapeHtml(keyTakeaway)}</div>
+    </div>
+    <div class="analysis-card">
+      <div class="analysis-card-title">PICO 架構</div>
+      <div class="pico-grid">
+        ${[
+          ["P", "Population", pico.P],
+          ["I", "Intervention", pico.I],
+          ["C", "Comparison", pico.C],
+          ["O", "Outcome", pico.O],
+        ]
+          .map(
+            ([key, label, items]) => `
+              <div class="pico-row">
+                <div class="pico-pill">${key}</div>
+                <div>
+                  <div class="pico-label">${label}</div>
+                  <div class="pico-items">
+                    ${(items || ["UNKNOWN"])
+                      .map((item) => `<p>${escapeHtml(item)}</p>`)
+                      .join("")}
+                  </div>
+                </div>
+              </div>
+            `
+          )
+          .join("")}
+      </div>
+    </div>
+  </div>
+`;
 
 const renderAbstract = (text) => {
   const blocks = String(text || "")
@@ -258,11 +260,6 @@ const renderList = () => {
     card.style.setProperty("--i", index);
     card.innerHTML = `
       <div class="article-title">${escapeHtml(article.title)}</div>
-      ${
-        article.title_zh
-          ? `<div class="article-title-zh">${escapeHtml(article.title_zh)}</div>`
-          : ""
-      }
       <div class="article-meta">
         <span>${escapeHtml(article.journal)}</span>
         <span>${escapeHtml(article.publish_date)}</span>
@@ -301,11 +298,6 @@ const renderDetail = () => {
     <div class="detail-header">
       <div>
         <div class="detail-title">${escapeHtml(article.title)}</div>
-        ${
-          article.title_zh
-            ? `<div class="detail-title-zh">${escapeHtml(article.title_zh)}</div>`
-            : ""
-        }
         <div class="article-meta">
           <span>${escapeHtml(article.journal)}</span>
           <span>${escapeHtml(article.publish_date)}</span>
@@ -338,8 +330,8 @@ const renderDetail = () => {
         </div>
       `
           : `
-        <p class="muted">尚未生成摘要總結。</p>
-        <button class="ghost small" id="summary-btn">摘要總結</button>
+        <p class="muted">尚未生成摘要。</p>
+        <button class="ghost small" id="summary-btn">產出摘要</button>
       `
       }
     </div>
@@ -369,15 +361,17 @@ const renderDetail = () => {
         const response = await fetch(`/api/articles/${article.id}/summary`, {
           method: "POST",
         });
-        if (!response.ok) {
-          throw new Error("summary fetch failed");
-        }
         const data = await response.json();
-        article.summary = data || "UNKNOWN";
+        if (!response.ok || data.ok === false) {
+          const message = data.error || "summary fetch failed";
+          throw new Error(message);
+        }
+        article.summary = data.summary || "UNKNOWN";
         renderDetail();
       } catch (error) {
         console.error(error);
-        summaryBtn.textContent = "生成失敗，請重試";
+        const message = error?.message || "生成失敗，請重試";
+        summaryBtn.textContent = `生成失敗：${message}`.slice(0, 80);
         summaryBtn.disabled = false;
       }
     });

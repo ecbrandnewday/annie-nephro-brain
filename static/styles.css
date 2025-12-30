@@ -386,22 +386,6 @@ h2 {
   gap: 10px;
 }
 
-.summary-meta {
-  display: grid;
-  gap: 6px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: #f7f5ee;
-}
-
-.summary-framework {
-  font-weight: 600;
-}
-
-.summary-one-liner {
-  color: var(--muted);
-}
-
 .summary-section {
   display: grid;
   gap: 6px;
@@ -411,26 +395,112 @@ h2 {
   font-weight: 600;
 }
 
-.summary-item {
-  display: block;
-}
-
-.summary-evidence {
-  margin-top: 4px;
-  font-size: 0.8rem;
-  color: var(--muted);
-}
-
-.summary-flags {
-  font-size: 0.8rem;
-  color: var(--muted);
-}
-
 .summary-list {
   margin: 0;
   padding-left: 18px;
   display: grid;
   gap: 6px;
+}
+
+.analysis-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.analysis-takeaway {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: #eef1fb;
+  border: 1px solid #dfe4f3;
+}
+
+.analysis-label {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #5b6db2;
+  margin-bottom: 6px;
+}
+
+.analysis-body {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.analysis-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.pico-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.pico-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.pico-pill {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: #eef1fb;
+  color: #5b6db2;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  border: 1px solid #dfe4f3;
+}
+
+.pico-label {
+  font-weight: 700;
+  color: #6f7a8f;
+  margin-bottom: 4px;
+}
+
+.pico-items p {
+  margin: 0 0 6px;
+}
+
+.pico-items p:last-child {
+  margin-bottom: 0;
+}
+
+.analysis-card {
+  background: #ffffff;
+  border: 1px solid #e6e2d6;
+  border-radius: 16px;
+  padding: 14px 16px;
+}
+
+.analysis-card-title {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-bottom: 10px;
+}
+
+.impact-card {
+  background: #f1fbf6;
+  border-color: #d4efe2;
+}
+
+.impact-label {
+  font-weight: 700;
+  color: #1b7b57;
+  margin-bottom: 8px;
+}
+
+.impact-body {
+  color: #24493b;
+}
+
+@media (min-width: 980px) {
+  .analysis-grid {
+    grid-template-columns: 1.3fr 0.9fr;
+  }
 }
 
 .pico-list {

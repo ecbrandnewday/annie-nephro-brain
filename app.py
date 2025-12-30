@@ -4,7 +4,7 @@ from datetime import date, datetime
 
 from flask import Flask, jsonify, render_template, request
 
-from ai import summarize, summarize_article_with_openai, translate_title
+from ai import debug_openai_ping, summarize, summarize_article_with_openai
 from db import get_article_summary as get_cached_summary, get_db, get_meta, init_db, upsert_article_summary
 from ingest import DEFAULT_JOURNALS, run_ingest, run_ingest_range
 
@@ -14,13 +14,9 @@ app = Flask(__name__)
 def row_to_dict(row):
     tags = json.loads(row["tags"]) if row["tags"] else []
     summary = summarize(row["title"], row["abstract"], tags)
-    title_zh = translate_title(row["title"])
-    if title_zh == "UNKNOWN":
-        title_zh = None
     return {
         "id": row["id"],
         "title": row["title"],
-        "title_zh": title_zh,
         "abstract": row["abstract"],
         "journal": row["journal"],
         "publish_date": row["publish_date"],
@@ -126,13 +122,27 @@ def get_article_summary(article_id):
             payload = json.loads(cached)
         except json.JSONDecodeError:
             payload = None
-        if payload:
+        if isinstance(payload, dict) and "ok" in payload:
             conn.close()
-            return jsonify(payload)
+            return jsonify(payload), (200 if payload.get("ok") else 500)
     summary = summarize_article_with_openai(row["title"], row["abstract"] or "")
-    upsert_article_summary(conn, article_id, json.dumps(summary, ensure_ascii=False), datetime.utcnow().isoformat())
+    if not summary.get("ok"):
+        conn.close()
+        return jsonify(summary), 500
+    upsert_article_summary(
+        conn,
+        article_id,
+        json.dumps(summary, ensure_ascii=False),
+        datetime.utcnow().isoformat(),
+    )
     conn.close()
     return jsonify(summary)
+
+
+@app.route("/api/debug/openai")
+def debug_openai():
+    payload = debug_openai_ping()
+    return jsonify(payload), (200 if payload.get("ok") else 500)
 
 
 @app.route("/api/refresh", methods=["POST"])

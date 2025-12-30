@@ -1,6 +1,6 @@
-import json
 import os
 import re
+import traceback
 
 import requests
 from dotenv import load_dotenv
@@ -204,148 +204,28 @@ def summarize_abstract_with_llm(abstract):
     return summary
 
 
-def _default_one_click_summary():
-    return {
-        "one_liner": "UNKNOWN",
-        "format": "STRUCTURED_SUMMARY",
-        "pico": {
-            "P": ["UNKNOWN"],
-            "I": ["UNKNOWN"],
-            "C": ["UNKNOWN"],
-            "O_primary": ["UNKNOWN"],
-            "O_secondary": ["UNKNOWN"],
-            "O_safety": ["UNKNOWN"],
-        },
-        "summary": {
-            "design": ["UNKNOWN"],
-            "methods": ["UNKNOWN"],
-            "results": ["UNKNOWN"],
-            "implications": ["UNKNOWN"],
-            "limitations": ["UNKNOWN"],
-        },
-        "evidence": {
-            "one_liner": ["UNKNOWN"],
-            "pico_or_summary": ["UNKNOWN"],
-        },
-        "quality_flags": ["missing_data"],
-    }
-
-
-def _trim_words(text, max_words):
-    words = (text or "").split()
-    if len(words) <= max_words:
-        return " ".join(words).strip()
-    return " ".join(words[:max_words]).strip()
-
-
-def _trim_one_liner(text, max_len=25):
-    text = (text or "").strip()
-    if not text:
-        return "UNKNOWN"
-    return text if len(text) <= max_len else text[:max_len]
-
-
-def _normalize_list(value):
-    if isinstance(value, list):
-        items = [str(item).strip() for item in value if str(item).strip()]
-    elif value:
-        items = [str(value).strip()]
-    else:
-        items = []
-    return items if items else ["UNKNOWN"]
-
-
-def _normalize_one_click_summary(payload):
-    data = payload if isinstance(payload, dict) else {}
-    format_value = data.get("format", "STRUCTURED_SUMMARY")
-    if format_value not in ["PICO", "STRUCTURED_SUMMARY"]:
-        format_value = "STRUCTURED_SUMMARY"
-
-    one_liner = _trim_one_liner(data.get("one_liner"))
-    pico = data.get("pico") if isinstance(data.get("pico"), dict) else {}
-    summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
-    evidence = data.get("evidence") if isinstance(data.get("evidence"), dict) else {}
-    quality_flags = data.get("quality_flags")
-    if not isinstance(quality_flags, list):
-        quality_flags = []
-
-    pico_payload = {
-        "P": _normalize_list(pico.get("P")),
-        "I": _normalize_list(pico.get("I")),
-        "C": _normalize_list(pico.get("C")),
-        "O_primary": _normalize_list(pico.get("O_primary")),
-        "O_secondary": _normalize_list(pico.get("O_secondary")),
-        "O_safety": _normalize_list(pico.get("O_safety")),
-    }
-    summary_payload = {
-        "design": _normalize_list(summary.get("design")),
-        "methods": _normalize_list(summary.get("methods")),
-        "results": _normalize_list(summary.get("results")),
-        "implications": _normalize_list(summary.get("implications")),
-        "limitations": _normalize_list(summary.get("limitations")),
-    }
-    evidence_one_liner = _normalize_list(evidence.get("one_liner"))
-    evidence_pico_or_summary = _normalize_list(evidence.get("pico_or_summary"))
-    evidence_payload = {
-        "one_liner": [_trim_words(item, 25) for item in evidence_one_liner],
-        "pico_or_summary": [_trim_words(item, 25) for item in evidence_pico_or_summary],
-    }
-
-    if format_value == "PICO":
-        if all(item == "UNKNOWN" for key in ["I", "C", "O_primary"] for item in pico_payload[key]):
-            quality_flags.append("missing_pico_fields")
-    return {
-        "one_liner": one_liner,
-        "format": format_value,
-        "pico": pico_payload,
-        "summary": summary_payload,
-        "evidence": evidence_payload,
-        "quality_flags": quality_flags,
-    }
-
-
-def _parse_json_payload(text):
-    if not text:
-        return None
-    content = text.strip()
-    if content.startswith("```"):
-        parts = content.split("```")
-        if len(parts) >= 2:
-            content = parts[1].strip()
-    start = content.find("{")
-    end = content.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        return None
-    snippet = content[start : end + 1]
-    try:
-        return json.loads(snippet)
-    except Exception:
-        return None
-
-
 def summarize_article_with_openai(title, abstract):
     if not title and not abstract:
-        return _default_one_click_summary()
+        return {"ok": False, "summary": "UNKNOWN", "error": "missing title/abstract"}
     cache_key = f"{title}||{abstract}"
     if cache_key in _ONE_CLICK_SUMMARY_CACHE:
         return _ONE_CLICK_SUMMARY_CACHE[cache_key]
     if not OPENAI_API_KEY:
-        return _default_one_click_summary()
+        print("[OpenAI] OPENAI_API_KEY not set")
+        return {"ok": False, "summary": "UNKNOWN", "error": "OPENAI_API_KEY not set"}
     prompt = (
-        "你是腎臟科臨床研究助理。只可使用提供的 Title 與 Abstract，"
-        "不可臆測未出現在 abstract 的細節。請輸出 JSON（不要多餘文字）。"
-        "判斷是否為介入/比較/有主要結局的研究；若是，輸出 PICO；若否，輸出結構化摘要。"
-        "輸出格式固定為："
-        "{"
-        "\"one_liner\":\"...(<=25字繁中)\","
-        "\"format\":\"PICO或STRUCTURED_SUMMARY\","
-        "\"pico\":{\"P\":[],\"I\":[],\"C\":[],\"O_primary\":[],\"O_secondary\":[],\"O_safety\":[]},"
-        "\"summary\":{\"design\":[],\"methods\":[],\"results\":[],\"implications\":[],\"limitations\":[]},"
-        "\"evidence\":{\"one_liner\":[\"...\"],\"pico_or_summary\":[\"...\"]},"
-        "\"quality_flags\":[]"
-        "}"
-        "缺資料請填 UNKNOWN 或空陣列；禁止模板空話；"
-        "evidence 只貼 abstract 原句短片段，每段 <=25 words。"
+        "你是腎臟科臨床研究助理。你的任務是從摘要抽取資訊並重組成 PICO。"
+        "只能使用提供的 Title 與 Abstract；摘要沒寫到的內容一律填 UNKNOWN，"
+        "不得推測或編造。輸出使用繁體中文，精準、短句、條列。"
+        "禁止模板空話（例如：Intervention in study / Comparator in study / Adult patients）。"
+        "請依固定格式輸出："
+        "第一行「重點結論：...」。"
+        "接著條列四行："
+        "• P：..."
+        "• I：..."
+        "• C：..."
+        "• O：..."
+        "總輸出不超過300字。"
     )
     user_content = f"Title: {title}\n\nAbstract:\n{abstract}"
     payload = {
@@ -365,18 +245,60 @@ def summarize_article_with_openai(title, abstract):
         )
         response.raise_for_status()
         data = response.json()
-        content = (
+        summary = (
             data.get("choices", [{}])[0]
             .get("message", {})
             .get("content", "")
             .strip()
         )
-        parsed = _parse_json_payload(content)
-        summary = _normalize_one_click_summary(parsed or {})
-    except Exception:
-        summary = _default_one_click_summary()
-    _ONE_CLICK_SUMMARY_CACHE[cache_key] = summary
-    return summary
+        if not summary:
+            raise ValueError("empty OpenAI response")
+        if len(summary) > 300:
+            summary = summary[:300].rstrip()
+        payload = {"ok": True, "summary": summary}
+        _ONE_CLICK_SUMMARY_CACHE[cache_key] = payload
+        return payload
+    except Exception as exc:
+        print(f"[OpenAI] model={OPENAI_MODEL} base_url={OPENAI_API_URL}")
+        print(f"[OpenAI] exception={exc!r}")
+        traceback.print_exc()
+        error = str(exc).strip() or repr(exc)
+        return {"ok": False, "summary": "UNKNOWN", "error": error[:500]}
+
+
+def debug_openai_ping():
+    if not OPENAI_API_KEY:
+        return {"ok": False, "error": "OPENAI_API_KEY not set"}
+    payload = {
+        "model": OPENAI_MODEL,
+        "messages": [
+            {"role": "system", "content": "You are a diagnostic helper."},
+            {"role": "user", "content": "OK"},
+        ],
+        "temperature": 0,
+    }
+    try:
+        response = requests.post(
+            OPENAI_API_URL,
+            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+            json=payload,
+            timeout=OPENAI_TIMEOUT,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = (
+            data.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+            .strip()
+        )
+        return {"ok": True, "text": text or "OK"}
+    except Exception as exc:
+        print(f"[OpenAI] model={OPENAI_MODEL} base_url={OPENAI_API_URL}")
+        print(f"[OpenAI] exception={exc!r}")
+        traceback.print_exc()
+        error = str(exc).strip() or repr(exc)
+        return {"ok": False, "error": error[:500]}
 def _dedupe_lines(lines):
     seen = set()
     result = []
