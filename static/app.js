@@ -933,14 +933,16 @@ if (favoritesOnlyEl) {
   });
 }
 
-dateSearchBtn.addEventListener("click", async () => {
-  const selectedDate = dateInputEl.value;
+const runDateSearch = async () => {
+  const selectedDate = dateInputEl ? dateInputEl.value : "";
   if (!selectedDate) {
     updateSyncInfo(undefined, "請先選擇日期。");
     return;
   }
-  dateSearchBtn.disabled = true;
-  dateSearchBtn.textContent = "查詢中...";
+  if (dateSearchBtn) {
+    dateSearchBtn.disabled = true;
+    dateSearchBtn.textContent = "查詢中...";
+  }
   try {
     await loadArticlesForDate(selectedDate);
     updateSyncInfo(undefined, state.articles.length ? "" : "該日期無文章。");
@@ -948,16 +950,30 @@ dateSearchBtn.addEventListener("click", async () => {
     console.error(error);
     updateSyncInfo(undefined, "查詢失敗，請稍後再試。");
   } finally {
-    dateSearchBtn.disabled = false;
-    dateSearchBtn.textContent = "查詢";
+    if (dateSearchBtn) {
+      dateSearchBtn.disabled = false;
+      dateSearchBtn.textContent = "查詢";
+    }
   }
-});
+};
 
-dateTodayBtn.addEventListener("click", () => {
-  const today = getTaiwanDate();
-  dateInputEl.value = today;
-  loadArticlesForDate(today);
-});
+if (dateSearchBtn) {
+  dateSearchBtn.addEventListener("click", runDateSearch);
+}
+
+if (dateInputEl) {
+  dateInputEl.addEventListener("change", runDateSearch);
+}
+
+if (dateTodayBtn) {
+  dateTodayBtn.addEventListener("click", () => {
+    const today = getTaiwanDate();
+    if (dateInputEl) {
+      dateInputEl.value = today;
+    }
+    loadArticlesForDate(today);
+  });
+}
 
 if (rangeEndEl) {
   rangeEndEl.value = getTaiwanMonth();
