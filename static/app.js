@@ -1,13 +1,22 @@
 const state = {
   articles: [],
-  activeTag: "ALL",
   selectedId: null,
   dateLabel: null,
+  selectedTags: [],
+  favoritesOnly: false,
+  pagination: {
+    mode: "date",
+    total: 0,
+    limit: 50,
+    offset: 0,
+    start: null,
+    end: null,
+    tags: [],
+  },
 };
 
 const listEl = document.getElementById("article-list");
 const detailEl = document.getElementById("detail");
-const tagRowEl = document.getElementById("tag-row");
 const resultCountEl = document.getElementById("result-count");
 const dateChipEl = document.getElementById("today-date");
 const refreshBtn = document.getElementById("refresh-btn");
@@ -20,6 +29,9 @@ const rangeStartEl = document.getElementById("range-start");
 const rangeEndEl = document.getElementById("range-end");
 const rangeSearchBtn = document.getElementById("range-search");
 const rangeStatusEl = document.getElementById("range-status");
+const tagOptionsEl = document.getElementById("tag-options");
+const favoritesOnlyEl = document.getElementById("favorites-only");
+const loadMoreBtn = document.getElementById("load-more");
 const exportFavoritesBtn = document.getElementById("export-favorites");
 const importFavoritesInput = document.getElementById("import-favorites");
 const favoritesStatusEl = document.getElementById("favorites-status");
@@ -28,6 +40,8 @@ const lastSyncEl = document.getElementById("last-sync");
 const syncStatusEl = document.getElementById("sync-status");
 const TAIWAN_TZ = "Asia/Taipei";
 const FAVORITES_KEY = "nephro_brain_favorites";
+const DEFAULT_LIMIT = 50;
+const INCLUDE_ABSTRACT_PARAM = "&include_abstract=0";
 
 const escapeHtml = (text) =>
   (text || "")
@@ -55,19 +69,64 @@ const renderSummaryText = (text) => {
   return lines.map((line) => `<p>${escapeHtml(line)}</p>`).join("");
 };
 
+const isUnknown = (value) => String(value || "").trim().toUpperCase() === "UNKNOWN";
 
-const renderSummaryPayload = (summary) => {
+const getSummaryText = (summary) => {
   if (summary && typeof summary === "object") {
-    return renderSummaryText(summary.summary || "UNKNOWN");
+    return String(summary.summary || "UNKNOWN");
   }
-  const parsed = parsePicoSummary(summary || "");
-  if (parsed) {
-    return renderPicoSummary(parsed);
-  }
-  return renderSummaryText(summary);
+  return String(summary || "UNKNOWN");
 };
 
-const parsePicoSummary = (text) => {
+const copyText = async (text) => {
+  if (!text) return false;
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (error) {
+      console.error(error);
+    }
+  }
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand("copy");
+    textarea.remove();
+    return ok;
+  } catch (error) {
+    console.error(error);
+    return false;
+  }
+};
+
+
+const RESEARCH_TYPE_LABELS = {
+  A: "Clinical trial / interventional study",
+  B: "Observational study",
+  C: "Diagnostic / prognostic / biomarker study",
+  D: "Systematic review / meta-analysis / narrative review",
+  E: "Guideline / consensus / position statement",
+  F: "Editorial / commentary / letter / viewpoint",
+  G: "Basic / animal / in vitro / mechanistic",
+  H: "Other / unclear",
+};
+
+const splitItems = (value) => {
+  const text = (value || "").trim();
+  if (!text) return ["UNKNOWN"];
+  const parts = text
+    .split(/[；;]\s*|(?<=。)\s*/g)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return parts.length ? parts : [text];
+};
+
+const parseSummaryBlocks = (text) => {
   const lines = String(text || "")
     .split(/\n+/)
     .map((line) => line.trim())
@@ -75,68 +134,202 @@ const parsePicoSummary = (text) => {
     .map((line) => line.replace(/^[-•]\s*/, "").trim());
   if (!lines.length) return null;
   let keyTakeaway = "";
+  let researchTypeCode = null;
+  let researchTypeLabel = "";
   const pico = { P: [], I: [], C: [], O: [] };
+  const sections = [];
+  const freeformItems = [];
+
+  const addSection = (title, value) => {
+    sections.push({ title, items: splitItems(value) });
+  };
+
   for (const line of lines) {
+    if (line.startsWith("【研究類型】")) {
+      const rest = line.replace("【研究類型】", "").trim();
+      const match = rest.match(/^([A-H])/i);
+      if (match) {
+        researchTypeCode = match[1].toUpperCase();
+      }
+      const cleanedRest = rest.replace(/^([A-H])\s*[\)\]】\-]?\s*/i, "").trim();
+      let matchedLabel = "";
+      if (cleanedRest) {
+        const normalizedRest = cleanedRest.toLowerCase();
+        for (const label of Object.values(RESEARCH_TYPE_LABELS)) {
+          if (normalizedRest.startsWith(label.toLowerCase())) {
+            matchedLabel = label;
+            break;
+          }
+        }
+      }
+      researchTypeLabel =
+        matchedLabel || cleanedRest || RESEARCH_TYPE_LABELS[researchTypeCode] || "";
+      continue;
+    }
     if (
       line.startsWith("重點結論：") ||
+      line.startsWith("一句話結論：") ||
+      line.startsWith("一句話重點：") ||
       line.toLowerCase().startsWith("key takeaway:")
     ) {
       keyTakeaway = line.split(/：|:/).slice(1).join("：").trim();
       continue;
     }
-    const match = line.match(/^([PICO])\s*[:：]\s*(.+)$/i);
-    if (match) {
-      const key = match[1].toUpperCase();
-      const value = match[2].trim();
+    const picoMatch = line.match(/^([PICO]|I\/INDEX)\s*[:：]\s*(.+)$/i);
+    if (picoMatch) {
+      const rawKey = picoMatch[1].toUpperCase();
+      const key = rawKey === "I/INDEX" ? "I" : rawKey;
+      const value = picoMatch[2].trim();
       if (pico[key]) {
         pico[key].push(value || "UNKNOWN");
       }
+      continue;
     }
+    const parts = line.split(/：|:/);
+    if (parts.length > 1) {
+      const title = parts[0].trim();
+      const value = parts.slice(1).join("：").trim();
+      addSection(title, value);
+      continue;
+    }
+    freeformItems.push(line);
   }
-  const hasPico = Object.values(pico).some((items) => items.length);
-  if (!keyTakeaway && !hasPico) return null;
+
+  if (!sections.length && freeformItems.length) {
+    sections.push({ title: "摘要重點", items: freeformItems });
+  }
+  const hasPicoLines = Object.values(pico).some((items) => items.length);
+  const hasSections = sections.length > 0;
+  if (!keyTakeaway && !hasPicoLines && !hasSections) return null;
   if (!keyTakeaway) keyTakeaway = "UNKNOWN";
-  ["P", "I", "C", "O"].forEach((key) => {
-    if (!pico[key].length) pico[key].push("UNKNOWN");
-  });
-  return { keyTakeaway, pico };
+  if (hasPicoLines) {
+    ["P", "I", "C", "O"].forEach((key) => {
+      if (!pico[key].length) pico[key].push("UNKNOWN");
+    });
+  }
+  if (!researchTypeLabel && researchTypeCode) {
+    researchTypeLabel = RESEARCH_TYPE_LABELS[researchTypeCode] || researchTypeCode;
+  }
+  return {
+    keyTakeaway,
+    researchTypeCode,
+    researchTypeLabel,
+    pico,
+    sections,
+    hasPicoLines,
+  };
 };
 
-const renderPicoSummary = ({ keyTakeaway, pico }) => `
-  <div class="analysis-panel">
-    <div class="analysis-takeaway">
-      <div class="analysis-label">重點結論</div>
-      <div class="analysis-body">${escapeHtml(keyTakeaway)}</div>
-    </div>
-    <div class="analysis-card">
-      <div class="analysis-card-title">PICO 架構</div>
-      <div class="pico-grid">
-        ${[
-          ["P", "Population", pico.P],
-          ["I", "Intervention", pico.I],
-          ["C", "Comparison", pico.C],
-          ["O", "Outcome", pico.O],
-        ]
-          .map(
-            ([key, label, items]) => `
-              <div class="pico-row">
-                <div class="pico-pill">${key}</div>
-                <div>
-                  <div class="pico-label">${label}</div>
-                  <div class="pico-items">
-                    ${(items || ["UNKNOWN"])
-                      .map((item) => `<p>${escapeHtml(item)}</p>`)
-                      .join("")}
-                  </div>
-                </div>
-              </div>
-            `
-          )
-          .join("")}
+const renderSummaryRows = (rows) =>
+  rows
+    .map(
+      ({ title, items }) => `
+        <div class="summary-row">
+          <div class="summary-row-title">${escapeHtml(title)}</div>
+          <div class="summary-row-body">
+            ${items.map((item) => `<p>${escapeHtml(item)}</p>`).join("")}
+          </div>
+        </div>
+      `
+    )
+    .join("");
+
+const renderSummaryPayload = (summary) => {
+  if (summary && typeof summary === "object") {
+    return renderSummaryText(summary.summary || "UNKNOWN");
+  }
+  const parsed = parseSummaryBlocks(summary || "");
+  if (!parsed) {
+    return renderSummaryText(summary);
+  }
+
+  const typeRow = parsed.researchTypeLabel
+    ? `
+      <div class="summary-card">
+        <div class="summary-card-title">研究類型</div>
+        <div class="summary-card-body">
+          <p>${escapeHtml(parsed.researchTypeLabel)}</p>
+        </div>
+      </div>
+    `
+    : "";
+
+  const takeawayCard = `
+    <div class="summary-card highlight-card">
+      <div class="summary-card-title">重點結論</div>
+      <div class="summary-card-body">
+        <p>${escapeHtml(parsed.keyTakeaway)}</p>
       </div>
     </div>
-  </div>
-`;
+  `;
+
+  const summaryRows = parsed.sections.length
+    ? parsed.sections
+    : [{ title: "摘要重點", items: ["UNKNOWN"] }];
+  const singleSummaryOnly =
+    summaryRows.length === 1 && summaryRows[0].title === "摘要重點";
+  const isClinical = ["A", "B", "C"].includes(parsed.researchTypeCode);
+  if (isClinical) {
+    const picoRows = [
+      { title: "P", items: parsed.pico.P.length ? parsed.pico.P : ["UNKNOWN"] },
+      { title: "I", items: parsed.pico.I.length ? parsed.pico.I : ["UNKNOWN"] },
+      { title: "C", items: parsed.pico.C.length ? parsed.pico.C : ["UNKNOWN"] },
+      { title: "O", items: parsed.pico.O.length ? parsed.pico.O : ["UNKNOWN"] },
+    ];
+    const hasPicoContent = picoRows.some((row) =>
+      row.items.some((item) => !isUnknown(item))
+    );
+    if (!hasPicoContent && parsed.sections.length) {
+      return `
+        <div class="summary-cards">
+          ${typeRow}
+          ${takeawayCard}
+          <div class="summary-card">
+            <div class="summary-card-title">摘要重點</div>
+            <div class="summary-card-body">
+              ${
+                singleSummaryOnly
+                  ? summaryRows[0].items.map((item) => `<p>${escapeHtml(item)}</p>`).join("")
+                  : renderSummaryRows(summaryRows)
+              }
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    return `
+      <div class="summary-cards">
+        ${typeRow}
+        ${takeawayCard}
+        <div class="summary-card pico-card">
+          <div class="summary-card-title pico-title">
+            <span class="pico-icon" aria-hidden="true"></span>
+            <span>架構</span>
+          </div>
+          <div class="summary-card-body">
+            ${renderSummaryRows(picoRows)}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+  return `
+    <div class="summary-cards">
+      ${typeRow}
+      ${takeawayCard}
+      <div class="summary-card">
+        <div class="summary-card-title">摘要重點</div>
+        <div class="summary-card-body">
+          ${
+            singleSummaryOnly
+              ? summaryRows[0].items.map((item) => `<p>${escapeHtml(item)}</p>`).join("")
+              : renderSummaryRows(summaryRows)
+          }
+        </div>
+      </div>
+    </div>
+  `;
+};
 
 const renderAbstract = (text) => {
   const blocks = String(text || "")
@@ -185,6 +378,79 @@ const applyFavorites = (articles) => {
   return articles;
 };
 
+const getSelectedTags = () => {
+  if (!tagOptionsEl) return [];
+  return Array.from(tagOptionsEl.querySelectorAll('input[type="checkbox"]'))
+    .filter((input) => input.checked)
+    .map((input) => input.value);
+};
+
+const buildTagParam = (tags) =>
+  tags && tags.length ? `&tags=${encodeURIComponent(tags.join(","))}` : "";
+
+const mergeArticleInState = (updated) => {
+  if (!updated) return;
+  const index = state.articles.findIndex((item) => item.id === updated.id);
+  if (index === -1) return;
+  state.articles[index] = { ...state.articles[index], ...updated };
+};
+
+const detailFetches = new Map();
+
+const fetchArticleDetail = async (articleId) => {
+  if (!articleId) return null;
+  if (detailFetches.has(articleId)) {
+    return detailFetches.get(articleId);
+  }
+  const request = (async () => {
+    try {
+      const response = await fetch(`/api/articles/${articleId}`);
+      if (!response.ok) return null;
+      return await response.json();
+    } catch (error) {
+      console.error(error);
+      return null;
+    } finally {
+      detailFetches.delete(articleId);
+    }
+  })();
+  detailFetches.set(articleId, request);
+  return request;
+};
+
+const selectArticle = async (articleId, shouldScroll = false) => {
+  state.selectedId = articleId;
+  if (!articleId) {
+    renderDetail();
+    return;
+  }
+  const article = state.articles.find((item) => item.id === articleId);
+  if (!article) {
+    renderDetail();
+    return;
+  }
+  if (article.abstract == null) {
+    detailEl.innerHTML = `
+      <div class="empty-state">
+        載入中...
+      </div>
+    `;
+    const fullArticle = await fetchArticleDetail(articleId);
+    if (fullArticle) {
+      mergeArticleInState(fullArticle);
+    }
+  }
+  if (state.selectedId !== articleId) {
+    return;
+  }
+  renderDetail();
+  if (shouldScroll && window.matchMedia("(max-width: 900px)").matches && detailPanelEl) {
+    setTimeout(() => {
+      detailPanelEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
+  }
+};
+
 const toggleFavorite = (articleId) => {
   const favorites = getFavoriteSet();
   if (favorites.has(articleId)) {
@@ -208,45 +474,24 @@ const setFavoritesStatus = (message) => {
   }
 };
 
-const buildTagButton = (tag) => {
-  const button = document.createElement("button");
-  button.className = `tag ${state.activeTag === tag.value ? "active" : ""}`;
-  button.textContent = tag.label;
-  button.addEventListener("click", () => {
-    state.activeTag = tag.value;
-    render();
-  });
-  return button;
-};
-
-const renderTags = () => {
-  tagRowEl.innerHTML = "";
-  const tagSet = new Set();
-  state.articles.forEach((article) => {
-    article.tags.forEach((tag) => tagSet.add(tag));
-  });
-  const tags = [
-    { label: "全部", value: "ALL" },
-    { label: "已收藏", value: "FAVORITES" },
-  ];
-  Array.from(tagSet).forEach((tag) => tags.push({ label: tag, value: tag }));
-  tags.forEach((tag) => tagRowEl.appendChild(buildTagButton(tag)));
-};
-
 const renderList = () => {
   listEl.innerHTML = "";
   let articles = state.articles;
-  if (state.activeTag === "FAVORITES") {
+  if (state.favoritesOnly) {
     articles = articles.filter((article) => article.favorite);
-  } else if (state.activeTag !== "ALL") {
-    articles = articles.filter((article) => article.tags.includes(state.activeTag));
   }
-  resultCountEl.textContent = `${articles.length} 篇`;
+  if (state.pagination.mode === "range") {
+    resultCountEl.textContent = `${articles.length} / ${state.pagination.total} 篇`;
+  } else {
+    resultCountEl.textContent = `${articles.length} 篇`;
+  }
   if (articles.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
-    if (state.activeTag === "FAVORITES") {
+    if (state.favoritesOnly) {
       empty.textContent = "尚未收藏文章。";
+    } else if (state.pagination.mode === "range") {
+      empty.textContent = "該區間沒有文章。";
     } else {
       empty.textContent = "這一天沒有文章，請改選其他日期。";
     }
@@ -261,9 +506,9 @@ const renderList = () => {
     card.innerHTML = `
       <div class="article-title">${escapeHtml(article.title)}</div>
       <div class="article-meta">
-        <span>${escapeHtml(article.journal)}</span>
+        <span class="meta-journal">${escapeHtml(article.journal)}</span>
         <span>${escapeHtml(article.publish_date)}</span>
-        <span>${escapeHtml(article.study_type)}</span>
+        <span class="meta-type">${escapeHtml(article.study_type)}</span>
       </div>
       <div class="article-meta">
         ${article.tags.map((tag) => `<span class="tag-pill">${escapeHtml(tag)}</span>`).join("")}
@@ -271,13 +516,7 @@ const renderList = () => {
       </div>
     `;
     card.addEventListener("click", () => {
-      state.selectedId = article.id;
-      renderDetail();
-      if (window.matchMedia("(max-width: 900px)").matches && detailPanelEl) {
-        setTimeout(() => {
-          detailPanelEl.scrollIntoView({ behavior: "smooth", block: "start" });
-        }, 0);
-      }
+      void selectArticle(article.id, true);
     });
     listEl.appendChild(card);
   });
@@ -299,9 +538,9 @@ const renderDetail = () => {
       <div>
         <div class="detail-title">${escapeHtml(article.title)}</div>
         <div class="article-meta">
-          <span>${escapeHtml(article.journal)}</span>
+          <span class="meta-journal">${escapeHtml(article.journal)}</span>
           <span>${escapeHtml(article.publish_date)}</span>
-          <span>${escapeHtml(article.study_type)}</span>
+          <span class="meta-type">${escapeHtml(article.study_type)}</span>
         </div>
       </div>
       <div class="detail-actions">
@@ -315,7 +554,10 @@ const renderDetail = () => {
       </div>
     </div>
     <div class="section">
-      <h3>摘要</h3>
+      <div class="section-header">
+        <h3>摘要</h3>
+        <button class="ghost small" id="abstract-copy">複製摘要</button>
+      </div>
       <div class="abstract-block">
         ${renderAbstract(article.abstract || "UNKNOWN")}
       </div>
@@ -376,12 +618,34 @@ const renderDetail = () => {
       }
     });
   }
+
+  const abstractCopyBtn = document.getElementById("abstract-copy");
+  if (abstractCopyBtn) {
+    abstractCopyBtn.addEventListener("click", async () => {
+      const text = String(article.abstract || "UNKNOWN");
+      const ok = await copyText(text);
+      abstractCopyBtn.textContent = ok ? "已複製" : "複製失敗";
+      setTimeout(() => {
+        abstractCopyBtn.textContent = "複製摘要";
+      }, 1500);
+    });
+  }
 };
 
 const render = () => {
-  renderTags();
   renderList();
-  renderDetail();
+  void selectArticle(state.selectedId);
+};
+
+const updateLoadMoreVisibility = () => {
+  if (!loadMoreBtn) return;
+  if (state.pagination.mode !== "range") {
+    loadMoreBtn.style.display = "none";
+    return;
+  }
+  const nextOffset = state.pagination.offset + state.pagination.limit;
+  loadMoreBtn.style.display =
+    nextOffset < state.pagination.total ? "inline-flex" : "none";
 };
 
 const setRangeStatus = (message) => {
@@ -389,21 +653,33 @@ const setRangeStatus = (message) => {
   rangeStatusEl.textContent = message || "";
 };
 
-const validateRange = (startDate, endDate) => {
-  if (!startDate || !endDate) {
-    return { ok: false, message: "請選擇完整的區間日期。" };
+const parseMonthValue = (value) => {
+  if (!value) return null;
+  const parts = value.split("-");
+  if (parts.length !== 2) return null;
+  const year = Number(parts[0]);
+  const month = Number(parts[1]);
+  if (!year || !month || month < 1 || month > 12) return null;
+  return { year, month };
+};
+
+const validateMonthRange = (startMonth, endMonth) => {
+  if (!startMonth || !endMonth) {
+    return { ok: false, message: "請選擇完整的月份區間。" };
   }
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-    return { ok: false, message: "日期格式不正確。" };
+  const start = parseMonthValue(startMonth);
+  const end = parseMonthValue(endMonth);
+  if (!start || !end) {
+    return { ok: false, message: "月份格式不正確。" };
   }
-  if (start > end) {
-    return { ok: false, message: "起始日期不可晚於結束日期。" };
+  const startIndex = start.year * 12 + start.month;
+  const endIndex = end.year * 12 + end.month;
+  if (startIndex > endIndex) {
+    return { ok: false, message: "起始月份不可晚於結束月份。" };
   }
-  const diffDays = Math.floor((end - start) / (24 * 60 * 60 * 1000)) + 1;
-  if (diffDays > 30) {
-    return { ok: false, message: "查詢區間最多 30 天。" };
+  const monthSpan = endIndex - startIndex + 1;
+  if (monthSpan > 12) {
+    return { ok: false, message: "查詢區間最多 12 個月。" };
   }
   return { ok: true };
 };
@@ -448,16 +724,45 @@ const getTaiwanDate = () => {
   return year && month && day ? `${year}-${month}-${day}` : "";
 };
 
+const getTaiwanMonth = () => {
+  const today = getTaiwanDate();
+  return today ? today.slice(0, 7) : "";
+};
+
+const monthToDateRange = (monthValue, isEnd) => {
+  const parsed = parseMonthValue(monthValue);
+  if (!parsed) return null;
+  const start = new Date(parsed.year, parsed.month - 1, 1);
+  if (!isEnd) {
+    return start.toISOString().slice(0, 10);
+  }
+  const end = new Date(parsed.year, parsed.month, 0);
+  return end.toISOString().slice(0, 10);
+};
+
 const loadArticlesForDate = async (dateValue) => {
   if (!dateValue) {
     await loadArticles();
     return;
   }
-  const response = await fetch(`/api/articles?date=${dateValue}`);
+  const tags = getSelectedTags();
+  const tagParam = buildTagParam(tags);
+  const response = await fetch(
+    `/api/articles?date=${dateValue}&limit=${DEFAULT_LIMIT}${tagParam}${INCLUDE_ABSTRACT_PARAM}`
+  );
   const data = await response.json();
   state.articles = applyFavorites(data.articles);
   state.dateLabel = dateValue;
   state.selectedId = state.articles[0] ? state.articles[0].id : null;
+  state.pagination = {
+    mode: "date",
+    total: data.articles.length,
+    limit: DEFAULT_LIMIT,
+    offset: 0,
+    start: null,
+    end: null,
+    tags,
+  };
   if (dateChipEl) {
     dateChipEl.textContent = `查詢日期 ${state.dateLabel}`;
   }
@@ -468,36 +773,65 @@ const loadArticlesForDate = async (dateValue) => {
   if (dateInputEl) {
     dateInputEl.value = dateValue;
   }
+  updateLoadMoreVisibility();
   render();
 };
 
-const loadArticlesForRange = async (startDate, endDate) => {
-  const validation = validateRange(startDate, endDate);
+const loadArticlesForRange = async (startMonth, endMonth) => {
+  const validation = validateMonthRange(startMonth, endMonth);
   if (!validation.ok) {
     setRangeStatus(validation.message);
     return;
   }
   setRangeStatus("");
-  const response = await fetch(`/api/articles?start=${startDate}&end=${endDate}`);
-  const data = await response.json();
+  const tags = getSelectedTags();
+  const tagParam = buildTagParam(tags);
+  const response = await fetch(
+    `/api/articles/range?start=${startMonth}&end=${endMonth}&limit=${DEFAULT_LIMIT}&offset=0${tagParam}${INCLUDE_ABSTRACT_PARAM}`
+  );
   if (!response.ok) {
-    setRangeStatus("區間查詢失敗，請確認日期。");
+    try {
+      const errorData = await response.json();
+      setRangeStatus(errorData.error || "區間查詢失敗，請確認日期。");
+    } catch (error) {
+      setRangeStatus("區間查詢失敗，請確認日期。");
+    }
     return;
   }
-  state.articles = applyFavorites(data.articles);
-  state.dateLabel = data.date || endDate;
+  const data = await response.json();
+  state.articles = applyFavorites(data.items);
+  state.dateLabel = endMonth;
   state.selectedId = state.articles[0] ? state.articles[0].id : null;
+  state.pagination = {
+    mode: "range",
+    total: data.total,
+    limit: DEFAULT_LIMIT,
+    offset: 0,
+    start: startMonth,
+    end: endMonth,
+    tags,
+  };
+  if (dateChipEl) {
+    dateChipEl.textContent = `查詢月份 ${startMonth} - ${endMonth}`;
+  }
   render();
-  setRangeStatus(data.articles.length ? "" : "該區間沒有文章。");
+  updateLoadMoreVisibility();
+  setRangeStatus(data.items.length ? "" : "該區間沒有文章。");
 };
 
 const loadArticles = async (statusOverride) => {
   const today = getTaiwanDate() || new Date().toISOString().slice(0, 10);
   let statusText = statusOverride || "";
-  let response = await fetch(`/api/articles?date=${today}`);
+  const tags = state.pagination.tags || [];
+  const tagParam = buildTagParam(tags);
+  let response = await fetch(
+    `/api/articles?date=${today}&limit=${DEFAULT_LIMIT}${tagParam}${INCLUDE_ABSTRACT_PARAM}`
+  );
   let data = await response.json();
   if (!data.articles.length) {
-    response = await fetch("/api/articles");
+    response = await fetch(
+      `/api/articles?limit=${DEFAULT_LIMIT}${tagParam}${INCLUDE_ABSTRACT_PARAM}`
+    );
     data = await response.json();
     if (!statusOverride) {
       if (data.articles.length) {
@@ -510,6 +844,15 @@ const loadArticles = async (statusOverride) => {
   state.articles = applyFavorites(data.articles);
   state.dateLabel = data.date || today;
   state.selectedId = state.articles[0] ? state.articles[0].id : null;
+  state.pagination = {
+    mode: "date",
+    total: data.articles.length,
+    limit: DEFAULT_LIMIT,
+    offset: 0,
+    start: null,
+    end: null,
+    tags,
+  };
   if (dateChipEl) {
     dateChipEl.textContent = `更新至 ${state.dateLabel}`;
   }
@@ -520,7 +863,33 @@ const loadArticles = async (statusOverride) => {
     dateInputEl.value = today;
   }
   updateSyncInfo(data.last_sync, statusText);
+  updateLoadMoreVisibility();
   render();
+};
+
+const loadMoreRange = async () => {
+  if (state.pagination.mode !== "range") return;
+  const nextOffset = state.pagination.offset + state.pagination.limit;
+  if (nextOffset >= state.pagination.total) {
+    updateLoadMoreVisibility();
+    return;
+  }
+  const tags = getSelectedTags();
+  const tagParam = buildTagParam(tags);
+  const response = await fetch(
+    `/api/articles/range?start=${state.pagination.start}&end=${state.pagination.end}` +
+      `&limit=${state.pagination.limit}&offset=${nextOffset}${tagParam}${INCLUDE_ABSTRACT_PARAM}`
+  );
+  if (!response.ok) {
+    setRangeStatus("載入更多失敗，請稍後再試。");
+    return;
+  }
+  const data = await response.json();
+  const newItems = applyFavorites(data.items || []);
+  state.articles = state.articles.concat(newItems);
+  state.pagination.offset = nextOffset;
+  render();
+  updateLoadMoreVisibility();
 };
 
 if (refreshBtn) {
@@ -551,6 +920,19 @@ if (dateInputEl) {
   dateInputEl.value = getTaiwanDate();
 }
 
+if (tagOptionsEl) {
+  tagOptionsEl.addEventListener("change", () => {
+    state.selectedTags = getSelectedTags();
+  });
+}
+
+if (favoritesOnlyEl) {
+  favoritesOnlyEl.addEventListener("change", () => {
+    state.favoritesOnly = favoritesOnlyEl.checked;
+    render();
+  });
+}
+
 dateSearchBtn.addEventListener("click", async () => {
   const selectedDate = dateInputEl.value;
   if (!selectedDate) {
@@ -560,14 +942,8 @@ dateSearchBtn.addEventListener("click", async () => {
   dateSearchBtn.disabled = true;
   dateSearchBtn.textContent = "查詢中...";
   try {
-    const response = await fetch(`/api/refresh?date=${selectedDate}`, {
-      method: "POST",
-    });
-    const data = await response.json();
-    const message =
-      response.ok && data.stored === 0 ? "該日期無新文章。" : "";
     await loadArticlesForDate(selectedDate);
-    updateSyncInfo(data.last_sync, message);
+    updateSyncInfo(undefined, state.articles.length ? "" : "該日期無文章。");
   } catch (error) {
     console.error(error);
     updateSyncInfo(undefined, "查詢失敗，請稍後再試。");
@@ -584,29 +960,41 @@ dateTodayBtn.addEventListener("click", () => {
 });
 
 if (rangeEndEl) {
-  rangeEndEl.value = getTaiwanDate();
+  rangeEndEl.value = getTaiwanMonth();
+}
+if (rangeStartEl) {
+  rangeStartEl.value = getTaiwanMonth();
 }
 
 if (rangeSearchBtn) {
   rangeSearchBtn.addEventListener("click", async () => {
     const startDate = rangeStartEl.value;
     const endDate = rangeEndEl.value;
-    const validation = validateRange(startDate, endDate);
-    if (!validation.ok) {
-      setRangeStatus(validation.message);
-      return;
-    }
     rangeSearchBtn.disabled = true;
     rangeSearchBtn.textContent = "查詢中...";
     try {
-      const response = await fetch(
-        `/api/refresh?start=${startDate}&end=${endDate}`,
-        { method: "POST" }
-      );
-      if (!response.ok) {
-        setRangeStatus("區間查詢失敗，請確認日期。");
+      const validation = validateMonthRange(startDate, endDate);
+      if (!validation.ok) {
+        setRangeStatus(validation.message);
         return;
       }
+      const startDateValue = monthToDateRange(startDate, false);
+      const endDateValue = monthToDateRange(endDate, true);
+      if (!startDateValue || !endDateValue) {
+        setRangeStatus("月份格式不正確。");
+        return;
+      }
+      setRangeStatus("匯入中，請稍候...");
+      const refreshResponse = await fetch(
+        `/api/refresh?start=${startDateValue}&end=${endDateValue}&max_per_journal=0`,
+        { method: "POST" }
+      );
+      if (!refreshResponse.ok) {
+        const errorData = await refreshResponse.json();
+        setRangeStatus(errorData.error || "匯入失敗，請確認日期。");
+        return;
+      }
+      setRangeStatus("匯入完成，正在載入...");
       await loadArticlesForRange(startDate, endDate);
     } catch (error) {
       console.error(error);
@@ -614,6 +1002,19 @@ if (rangeSearchBtn) {
     } finally {
       rangeSearchBtn.disabled = false;
       rangeSearchBtn.textContent = "查詢區間";
+    }
+  });
+}
+
+if (loadMoreBtn) {
+  loadMoreBtn.addEventListener("click", async () => {
+    loadMoreBtn.disabled = true;
+    loadMoreBtn.textContent = "載入中...";
+    try {
+      await loadMoreRange();
+    } finally {
+      loadMoreBtn.disabled = false;
+      loadMoreBtn.textContent = "載入更多";
     }
   });
 }

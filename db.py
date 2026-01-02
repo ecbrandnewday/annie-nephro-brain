@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 
@@ -40,6 +41,21 @@ def init_db():
     )
     cur.execute(
         """
+        CREATE TABLE IF NOT EXISTS article_tags (
+            article_id TEXT NOT NULL,
+            tag TEXT NOT NULL,
+            PRIMARY KEY(article_id, tag)
+        )
+        """
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_article_tags_tag ON article_tags(tag)"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_article_tags_article ON article_tags(article_id)"
+    )
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS meta (
             key TEXT PRIMARY KEY,
             value TEXT
@@ -56,6 +72,7 @@ def init_db():
         """
     )
     conn.commit()
+    _migrate_article_tags(conn)
     conn.close()
 
 
@@ -96,3 +113,31 @@ def upsert_article_summary(conn, article_id, summary_json, updated_at):
         (article_id, summary_json, updated_at),
     )
     conn.commit()
+
+
+def upsert_article_tags(conn, article_id, tags):
+    if not tags:
+        return
+    cur = conn.cursor()
+    for tag in tags:
+        cur.execute(
+            "INSERT OR IGNORE INTO article_tags (article_id, tag) VALUES (?, ?)",
+            (article_id, tag),
+        )
+    conn.commit()
+
+
+def _migrate_article_tags(conn):
+    migrated = get_meta(conn, "article_tags_migrated")
+    if migrated:
+        return
+    rows = conn.execute(
+        "SELECT id, tags FROM articles WHERE tags IS NOT NULL AND tags != ''"
+    ).fetchall()
+    for row in rows:
+        try:
+            tags = json.loads(row["tags"]) if row["tags"] else []
+        except json.JSONDecodeError:
+            tags = []
+        upsert_article_tags(conn, row["id"], tags)
+    set_meta(conn, "article_tags_migrated", "1")

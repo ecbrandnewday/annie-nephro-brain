@@ -19,20 +19,60 @@
       <section class="panel list-panel" id="list-panel">
         <div class="panel-header">
           <div>
-            <h2>今日更新</h2>
             <p class="muted" id="result-count"></p>
           </div>
           <div class="controls">
+            <div class="tag-filter">
+              <span class="muted">類別</span>
+              <div class="tag-options" id="tag-options">
+                <label class="tag-option">
+                  <input type="checkbox" value="CKD" />
+                  CKD
+                </label>
+                <label class="tag-option">
+                  <input type="checkbox" value="AKI" />
+                  AKI
+                </label>
+                <label class="tag-option">
+                  <input type="checkbox" value="HD" />
+                  HD
+                </label>
+                <label class="tag-option">
+                  <input type="checkbox" value="PD" />
+                  PD
+                </label>
+                <label class="tag-option">
+                  <input type="checkbox" value="Transplant" />
+                  Transplant
+                </label>
+                <label class="tag-option">
+                  <input type="checkbox" value="Electrolyte disorders" />
+                  Electrolyte disorders
+                </label>
+                <label class="tag-option">
+                  <input type="checkbox" value="GN / IgA / Lupus" />
+                  GN / IgA / Lupus
+                </label>
+                <label class="tag-option">
+                  <input type="checkbox" value="Drug / RCT / Guideline" />
+                  Drug / RCT / Guideline
+                </label>
+              </div>
+              <label class="favorites-only">
+                <input type="checkbox" id="favorites-only" />
+                只看已收藏
+              </label>
+            </div>
             <div class="date-filter">
               <input type="date" id="date-input" />
               <button class="ghost small" id="date-search">查詢</button>
               <button class="ghost small" id="date-today">今天</button>
             </div>
             <div class="range-filter">
-              <span class="muted">區間查詢（最多 30 天）</span>
-              <input type="date" id="range-start" />
+              <span class="muted">區間查詢（最多 12 個月）</span>
+              <input type="month" id="range-start" />
               <span class="muted">至</span>
-              <input type="date" id="range-end" />
+              <input type="month" id="range-end" />
               <button class="ghost small" id="range-search">查詢區間</button>
             </div>
             <p class="muted range-status" id="range-status"></p>
@@ -58,8 +98,10 @@
             </div>
           </div>
         </div>
-        <div class="tag-row" id="tag-row"></div>
         <div class="list" id="article-list"></div>
+        <div class="load-more">
+          <button class="ghost small" id="load-more">載入更多</button>
+        </div>
       </section>
       <section class="panel detail-panel" id="detail-panel">
         <div id="detail">
@@ -69,7 +111,6 @@
         </div>
       </section>
     </main>
-    <footer class="footer"></footer>
     <script src="{{ url_for('static', filename='app.js') }}"></script>
   </body>
 </html>

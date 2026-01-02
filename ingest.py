@@ -7,7 +7,7 @@ from xml.etree import ElementTree as ET
 import requests
 
 from ai import infer_tags, impact_assessment, pico_from_text, summarize
-from db import get_db, init_db, set_meta
+from db import get_db, init_db, set_meta, upsert_article_tags
 
 BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 DEFAULT_JOURNALS = [
@@ -236,7 +236,7 @@ def run_ingest_range(journals, start_date, end_date, max_per_journal):
             if not parsed:
                 continue
             tags = infer_tags(parsed["title"], parsed["abstract"])
-            summary = summarize(parsed["title"], parsed["abstract"], tags)
+            summary = summarize(parsed["title"], parsed["abstract"], tags, translate=False)
             pico = pico_from_text(
                 parsed["title"],
                 parsed["abstract"],
@@ -256,6 +256,7 @@ def run_ingest_range(journals, start_date, end_date, max_per_journal):
                 }
             )
             upsert_article(conn, parsed)
+            upsert_article_tags(conn, parsed["id"], tags)
             stored += 1
     set_meta(conn, "last_sync", datetime.now(timezone.utc).isoformat())
     conn.close()
