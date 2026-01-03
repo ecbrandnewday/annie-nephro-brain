@@ -287,4 +287,4 @@ if __name__ == "__main__":
         help="Port to listen on (defaults to $PORT or 5000).",
     )
     args = parser.parse_args()
-    app.run(host=args.host, port=args.port, debug=True)
+    app.run(host=args.host, port=args.port, debug=False)
