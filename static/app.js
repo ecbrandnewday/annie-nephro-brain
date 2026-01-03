@@ -965,10 +965,6 @@ const runDateSearch = async () => {
     updateSyncInfo(undefined, "請先選擇日期。");
     return;
   }
-  if (dateSearchBtn) {
-    dateSearchBtn.disabled = true;
-    dateSearchBtn.textContent = "查詢中...";
-  }
   try {
     await loadArticlesForDate(selectedDate);
     updateSyncInfo(undefined, state.articles.length ? "" : "該日期無文章。");
@@ -977,19 +973,16 @@ const runDateSearch = async () => {
     const message = error?.message || "查詢失敗，請稍後再試。";
     updateSyncInfo(undefined, message);
   } finally {
-    if (dateSearchBtn) {
-      dateSearchBtn.disabled = false;
-      dateSearchBtn.textContent = "查詢";
-    }
+    // no-op
   }
 };
 
-if (dateSearchBtn) {
-  dateSearchBtn.addEventListener("click", runDateSearch);
-}
-
 if (dateInputEl) {
   dateInputEl.addEventListener("change", runDateSearch);
+}
+
+if (dateSearchBtn) {
+  dateSearchBtn.addEventListener("click", runDateSearch);
 }
 
 if (dateTodayBtn) {
