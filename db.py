@@ -1,8 +1,10 @@
 import json
 import os
+import shutil
 import sqlite3
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "db.sqlite3")
+SEED_DB_PATH = os.path.join(os.path.dirname(__file__), "seed_db.sqlite3")
 
 
 def get_db():
@@ -12,6 +14,8 @@ def get_db():
 
 
 def init_db():
+    if not os.path.exists(DB_PATH) and os.path.exists(SEED_DB_PATH):
+        shutil.copyfile(SEED_DB_PATH, DB_PATH)
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
