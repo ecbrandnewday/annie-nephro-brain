@@ -371,11 +371,12 @@ const saveFavoriteIds = (ids) => {
 const getFavoriteSet = () => new Set(loadFavoriteIds());
 
 const applyFavorites = (articles) => {
+  const list = Array.isArray(articles) ? articles : [];
   const favorites = getFavoriteSet();
-  articles.forEach((article) => {
+  list.forEach((article) => {
     article.favorite = favorites.has(article.id);
   });
-  return articles;
+  return list;
 };
 
 const getSelectedTags = () => {
@@ -387,6 +388,27 @@ const getSelectedTags = () => {
 
 const buildTagParam = (tags) =>
   tags && tags.length ? `&tags=${encodeURIComponent(tags.join(","))}` : "";
+
+const fetchJson = async (url) => {
+  const response = await fetch(url);
+  let data = null;
+  try {
+    data = await response.json();
+  } catch (error) {
+    data = null;
+  }
+  if (!response.ok) {
+    const message = data && data.error ? data.error : "查詢失敗，請稍後再試。";
+    throw new Error(message);
+  }
+  return data;
+};
+
+const handleLoadError = (error) => {
+  console.error(error);
+  const message = error?.message || "載入失敗，請稍後再試。";
+  updateSyncInfo(undefined, message);
+};
 
 const mergeArticleInState = (updated) => {
   if (!updated) return;
@@ -747,10 +769,9 @@ const loadArticlesForDate = async (dateValue) => {
   }
   const tags = getSelectedTags();
   const tagParam = buildTagParam(tags);
-  const response = await fetch(
+  const data = await fetchJson(
     `/api/articles?date=${dateValue}&limit=${DEFAULT_LIMIT}${tagParam}${INCLUDE_ABSTRACT_PARAM}`
   );
-  const data = await response.json();
   state.articles = applyFavorites(data.articles);
   state.dateLabel = dateValue;
   state.selectedId = state.articles[0] ? state.articles[0].id : null;
@@ -824,47 +845,52 @@ const loadArticles = async (statusOverride) => {
   let statusText = statusOverride || "";
   const tags = state.pagination.tags || [];
   const tagParam = buildTagParam(tags);
-  let response = await fetch(
-    `/api/articles?date=${today}&limit=${DEFAULT_LIMIT}${tagParam}${INCLUDE_ABSTRACT_PARAM}`
-  );
-  let data = await response.json();
-  if (!data.articles.length) {
-    response = await fetch(
-      `/api/articles?limit=${DEFAULT_LIMIT}${tagParam}${INCLUDE_ABSTRACT_PARAM}`
+  try {
+    let data = await fetchJson(
+      `/api/articles?date=${today}&limit=${DEFAULT_LIMIT}${tagParam}${INCLUDE_ABSTRACT_PARAM}`
     );
-    data = await response.json();
-    if (!statusOverride) {
-      if (data.articles.length) {
-        statusText = "今日無新文章，已顯示最新日期。";
-      } else {
-        statusText = "目前沒有可顯示的文章。";
+    if (!data.articles.length) {
+      data = await fetchJson(
+        `/api/articles?limit=${DEFAULT_LIMIT}${tagParam}${INCLUDE_ABSTRACT_PARAM}`
+      );
+      if (!statusOverride) {
+        if (data.articles.length) {
+          statusText = "今日無新文章，已顯示最新日期。";
+        } else {
+          statusText = "目前沒有可顯示的文章。";
+        }
       }
     }
+    state.articles = applyFavorites(data.articles);
+    state.dateLabel = data.date || today;
+    state.selectedId = state.articles[0] ? state.articles[0].id : null;
+    state.pagination = {
+      mode: "date",
+      total: data.articles.length,
+      limit: DEFAULT_LIMIT,
+      offset: 0,
+      start: null,
+      end: null,
+      tags,
+    };
+    if (dateChipEl) {
+      dateChipEl.textContent = `更新至 ${state.dateLabel}`;
+    }
+    if (todayLabelEl) {
+      todayLabelEl.textContent = `今日日期：${today}`;
+    }
+    if (dateInputEl) {
+      dateInputEl.value = today;
+    }
+    updateSyncInfo(data.last_sync, statusText);
+    updateLoadMoreVisibility();
+    render();
+  } catch (error) {
+    state.articles = [];
+    state.selectedId = null;
+    render();
+    handleLoadError(error);
   }
-  state.articles = applyFavorites(data.articles);
-  state.dateLabel = data.date || today;
-  state.selectedId = state.articles[0] ? state.articles[0].id : null;
-  state.pagination = {
-    mode: "date",
-    total: data.articles.length,
-    limit: DEFAULT_LIMIT,
-    offset: 0,
-    start: null,
-    end: null,
-    tags,
-  };
-  if (dateChipEl) {
-    dateChipEl.textContent = `更新至 ${state.dateLabel}`;
-  }
-  if (todayLabelEl) {
-    todayLabelEl.textContent = `今日日期：${today}`;
-  }
-  if (dateInputEl) {
-    dateInputEl.value = today;
-  }
-  updateSyncInfo(data.last_sync, statusText);
-  updateLoadMoreVisibility();
-  render();
 };
 
 const loadMoreRange = async () => {
@@ -948,7 +974,8 @@ const runDateSearch = async () => {
     updateSyncInfo(undefined, state.articles.length ? "" : "該日期無文章。");
   } catch (error) {
     console.error(error);
-    updateSyncInfo(undefined, "查詢失敗，請稍後再試。");
+    const message = error?.message || "查詢失敗，請稍後再試。";
+    updateSyncInfo(undefined, message);
   } finally {
     if (dateSearchBtn) {
       dateSearchBtn.disabled = false;
@@ -971,7 +998,7 @@ if (dateTodayBtn) {
     if (dateInputEl) {
       dateInputEl.value = today;
     }
-    loadArticlesForDate(today);
+    loadArticlesForDate(today).catch(handleLoadError);
   });
 }
 
