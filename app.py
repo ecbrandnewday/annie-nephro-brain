@@ -3,7 +3,7 @@ import json
 import os
 from datetime import date, datetime, timedelta
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, make_response, render_template, request
 
 from ai import summarize_article_with_openai
 from db import get_article_summary as get_cached_summary, get_db, get_meta, init_db, upsert_article_summary
@@ -26,6 +26,7 @@ def _get_asset_version():
 
 
 app.config["ASSET_VERSION"] = os.environ.get("ASSET_VERSION") or _get_asset_version()
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 
 def _parse_tags(args):
@@ -71,7 +72,9 @@ def row_to_dict(row, include_abstract=False):
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    response = make_response(render_template("index.html"))
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/api/articles")
