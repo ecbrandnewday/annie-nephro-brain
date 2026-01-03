@@ -12,6 +12,22 @@ from ingest import DEFAULT_JOURNALS, run_ingest, run_ingest_range
 app = Flask(__name__)
 
 
+def _get_asset_version():
+    static_dir = os.path.join(app.root_path, "static")
+    candidates = ["app.js", "styles.css"]
+    mtimes = []
+    for name in candidates:
+        path = os.path.join(static_dir, name)
+        try:
+            mtimes.append(os.path.getmtime(path))
+        except OSError:
+            continue
+    return str(int(max(mtimes))) if mtimes else "1"
+
+
+app.config["ASSET_VERSION"] = os.environ.get("ASSET_VERSION") or _get_asset_version()
+
+
 def _parse_tags(args):
     values = []
     raw_list = args.getlist("tags")

@@ -4,7 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Nephro Brain｜腎臟科 AI 知識管家</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='styles.css', v=config['ASSET_VERSION']) }}"
+    />
   </head>
   <body>
     <div class="ambient"></div>
@@ -111,6 +114,6 @@
         </div>
       </section>
     </main>
-    <script src="{{ url_for('static', filename='app.js') }}"></script>
+    <script src="{{ url_for('static', filename='app.js', v=config['ASSET_VERSION']) }}"></script>
   </body>
 </html>
