@@ -1,10 +1,10 @@
 import json
 import os
-import shutil
 import sqlite3
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "db.sqlite3")
 SEED_DB_PATH = os.path.join(os.path.dirname(__file__), "seed_db.sqlite3")
+SEED_LIMIT = int(os.environ.get("SEED_LIMIT", 20))
 
 
 def get_db():
@@ -14,8 +14,6 @@ def get_db():
 
 
 def init_db():
-    if not os.path.exists(DB_PATH) and os.path.exists(SEED_DB_PATH):
-        shutil.copyfile(SEED_DB_PATH, DB_PATH)
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
@@ -76,6 +74,7 @@ def init_db():
         """
     )
     conn.commit()
+    _seed_if_empty(conn)
     _migrate_article_tags(conn)
     conn.close()
 
@@ -145,3 +144,48 @@ def _migrate_article_tags(conn):
             tags = []
         upsert_article_tags(conn, row["id"], tags)
     set_meta(conn, "article_tags_migrated", "1")
+
+
+def _seed_if_empty(conn):
+    if not os.path.exists(SEED_DB_PATH):
+        return
+    row = conn.execute("SELECT COUNT(*) FROM articles").fetchone()
+    if row and row[0]:
+        return
+    seed_conn = sqlite3.connect(SEED_DB_PATH)
+    seed_conn.row_factory = sqlite3.Row
+    seed_rows = seed_conn.execute(
+        "SELECT * FROM articles ORDER BY publish_date DESC LIMIT ?",
+        (SEED_LIMIT,),
+    ).fetchall()
+    if not seed_rows:
+        seed_conn.close()
+        return
+    columns = [
+        "id",
+        "title",
+        "abstract",
+        "journal",
+        "publish_date",
+        "url",
+        "tags",
+        "key_takeaway",
+        "study_type",
+        "primary_outcome",
+        "outcome_direction",
+        "pico_p",
+        "pico_i",
+        "pico_c",
+        "pico_o",
+        "impact_level",
+        "impact_reason",
+        "created_at",
+        "updated_at",
+    ]
+    placeholders = ",".join(["?"] * len(columns))
+    insert_sql = f"INSERT OR IGNORE INTO articles ({', '.join(columns)}) VALUES ({placeholders})"
+    for seed_row in seed_rows:
+        values = [seed_row[column] for column in columns]
+        conn.execute(insert_sql, values)
+    conn.commit()
+    seed_conn.close()
